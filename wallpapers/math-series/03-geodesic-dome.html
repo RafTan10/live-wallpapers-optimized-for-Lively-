@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Geodesic Dome</title>
+<!--
+  Geodesic Dome — live wallpaper for Lively Wallpaper (grey · mathematical series)
+  Add it in Lively: click "+" → choose this file.
+  Change the SETTINGS block below with Notepad, save, then re-add in Lively.
+-->
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; }
+</style>
+</head>
+<body>
+<canvas id="base"></canvas>
+<canvas id="over"></canvas>
+<script>
+// ===================== SETTINGS =====================
+const SETTINGS = {
+  theme: 'grey',    // 'grey' | 'warm' | 'green' | 'ice' | 'amber'
+  math: true,       // equations, labels and readouts (false = clean version)
+  parallax: true,   // gentle shift with the mouse
+  fps: 30,          // frame cap; 30 keeps the GPU/CPU load low
+  frequency: 4,     // subdivision of the icosahedron (2–6)
+};
+// ====================================================
+
+// Architecture — geodesic domes: an icosahedron subdivided and projected onto a sphere,
+// cut to a hemisphere, slowly turning. A laser scan plane, a second smaller dome, a site grid
+// and a plan-view drawing fill out the blueprint.
+const SCENE = {
+  focus: [0.63, 0.52],
+  anchors: [[0.30, 0.12], [0.56, 0.08], [0.22, 0.3], [0.62, 0.95], [0.42, 0.95], [0.44, 0.22]],
+  title: 'GEODESIC DOME · ICOSAHEDRAL',
+  sub: '',
+  eqs: [
+    { e: 'V − E + F = 2', n: "Euler's formula for a closed polyhedron" },
+    { e: 'F = 20ν²,  E = 30ν²,  V = 10ν² + 2', n: 'geodesic sphere of frequency ν' },
+    { e: 'x² + y² + z² = r²', n: 'every vertex lies on the sphere' },
+    { e: 'chord = 2r sin(α / 2)', n: 'strut length from its central angle' },
+    { e: '(0, ±1, ±φ)', n: 'icosahedron vertices, φ = golden ratio' },
+    { e: 'V − E + F = 1', n: 'Euler characteristic of a hemisphere (a disk)' }
+  ],
+  buildMesh(nu) {
+    const phi = (1 + Math.sqrt(5)) / 2;
+    let iv = [[-1, phi, 0], [1, phi, 0], [-1, -phi, 0], [1, -phi, 0], [0, -1, phi], [0, 1, phi], [0, -1, -phi], [0, 1, -phi],
+              [phi, 0, -1], [phi, 0, 1], [-phi, 0, -1], [-phi, 0, 1]];
+    const ang = Math.atan2(1, phi);          // tilt so a vertex points straight up
+    iv = iv.map(([x, y, z]) => [x * Math.cos(ang) - y * Math.sin(ang), x * Math.sin(ang) + y * Math.cos(ang), z]);
+    const faces = [[0, 11, 5], [0, 5, 1], [0, 1, 7], [0, 7, 10], [0, 10, 11], [1, 5, 9], [5, 11, 4], [11, 10, 2], [10, 7, 6], [7, 1, 8],
+                   [3, 9, 4], [3, 4, 2], [3, 2, 6], [3, 6, 8], [3, 8, 9], [4, 9, 5], [2, 4, 11], [6, 2, 10], [8, 6, 7], [9, 8, 1]];
+    const norm = v => { const l = Math.hypot(v[0], v[1], v[2]); return [v[0] / l, v[1] / l, v[2] / l]; };
+    const verts = [], index = new Map();
+    const vid = v => {
+      const k = v.map(c => Math.round(c * 1e4)).join(',');
+      if (!index.has(k)) { index.set(k, verts.length); verts.push(v); }
+      return index.get(k);
+    };
+    const tris = [];
+    for (const [a, b, c] of faces) {
+      const A = norm(iv[a]), B = norm(iv[b]), C = norm(iv[c]);
+      const P = (i, j) => norm([0, 1, 2].map(k => A[k] + (B[k] - A[k]) * i / nu + (C[k] - A[k]) * j / nu));
+      const id = {};
+      for (let i = 0; i <= nu; i++) for (let j = 0; j <= nu - i; j++) id[i + ',' + j] = vid(P(i, j));
+      for (let i = 0; i < nu; i++) for (let j = 0; j < nu - i; j++) {
+        tris.push([id[i + ',' + j], id[(i + 1) + ',' + j], id[i + ',' + (j + 1)]]);
+        if (i + j < nu - 1) tris.push([id[(i + 1) + ',' + j], id[(i + 1) + ',' + (j + 1)], id[i + ',' + (j + 1)]]);
+      }
+    }
+    const keep = tris.filter(t => (verts[t[0]][1] + verts[t[1]][1] + verts[t[2]][1]) / 3 > -0.02);
+    const used = new Set(), edges = new Map();
+    for (const t of keep) {
+      for (const v of t) used.add(v);
+      for (let k = 0; k < 3; k++) {
+        const a = t[k], b = t[(k + 1) % 3], key = a < b ? a + '-' + b : b + '-' + a;
+        edges.set(key, [a, b]);
+      }
+    }
+    return { verts, edges: [...edges.values()], used: [...used], V: used.size, E: edges.size, F: keep.length, glyph: verts.map(() => pick()) };
+  },
+  init() {
+    const nu = SETTINGS.frequency;
+    this.main = this.buildMesh(nu);
+    this.small = this.buildMesh(2);
+    const m = this.main;
+    this.sub = `ν = ${nu} · V ${m.V} · E ${m.E} · F ${m.F} · V − E + F = ${m.V - m.E + m.F}`;
+    this.S = Math.min(W, H) * 0.34;
+  },
+  update() {},
+  project(v, rot, cx, cy, S) {
+    const c = Math.cos(rot), s = Math.sin(rot);
+    const x = v[0] * c - v[2] * s, z = v[0] * s + v[2] * c, y = v[1];
+    const el = 0.32, ce = Math.cos(el), se = Math.sin(el);
+    const y2 = y * ce - z * se, z2 = y * se + z * ce;
+    const d = 4.2, f = d / (d + z2);
+    return [cx + x * S * f, cy - y2 * S * f, z2, f];
+  },
+  drawDome(mesh, cx, cy, S, rot, mul, scan) {
+    const P = mesh.verts.map(v => this.project(v, rot, cx, cy, S));
+    ctx.lineWidth = 1 * scale;
+    for (const [a, b] of mesh.edges) {
+      const pa = P[a], pb = P[b];
+      const depth = (pa[2] + pb[2]) / 2;
+      const hy = (mesh.verts[a][1] + mesh.verts[b][1]) / 2;
+      const hit = scan === null ? 0 : Math.max(0, 1 - Math.abs(hy - scan) / 0.06);
+      const front = 0.5 - depth * 0.5;
+      ctx.globalAlpha = (0.12 + 0.45 * front + 0.5 * hit) * mul;
+      ctx.strokeStyle = PAL[Math.round(10 + 8 * front + 5 * hit)];
+      ctx.beginPath(); ctx.moveTo(pa[0], pa[1]); ctx.lineTo(pb[0], pb[1]); ctx.stroke();
+    }
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.font = MONO(10);
+    for (const i of mesh.used) {
+      const p = P[i], hit = scan === null ? 0 : Math.max(0, 1 - Math.abs(mesh.verts[i][1] - scan) / 0.08), front = 0.5 - p[2] * 0.5;
+      ctx.globalAlpha = (0.2 * front + 0.85 * hit) * mul;
+      ctx.fillStyle = PAL[Math.round(14 + 8 * hit)];
+      if (hit > 0.05) ctx.fillText(mesh.glyph[i], p[0], p[1] - 9 * scale);
+      ctx.fillRect(p[0] - 1.2 * scale, p[1] - 1.2 * scale, 2.4 * scale, 2.4 * scale);
+    }
+  },
+  ring(r, y, rot, cx, cy, S) {
+    ctx.beginPath();
+    for (let s = 0; s <= 96; s++) {
+      const a = s / 96 * TAU, p = this.project([Math.cos(a) * r, y, Math.sin(a) * r], rot, cx, cy, S);
+      s ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]);
+    }
+  },
+  draw(t, ox, oy) {
+    const S = this.S;
+    const cx = this.focus[0] * W + ox, cy = this.focus[1] * H + oy + S * 0.2;
+    const rot = t * 0.06;
+    const scan = 0.5 + 0.5 * Math.sin(t * 0.35);
+    ctx.globalCompositeOperation = 'lighter';
+    // site grid on the ground plane, fading with distance
+    ctx.lineWidth = 0.7 * scale;
+    const G = 3.2, stp = 0.4;
+    for (let k = -G; k <= G + 1e-6; k += stp) {
+      for (const dir of [0, 1]) {
+        ctx.beginPath();
+        for (let s = -G; s <= G + 1e-6; s += stp / 2) {
+          const v = dir ? [k, 0, s] : [s, 0, k];
+          const p = this.project(v, 0.35, cx, cy, S);
+          s === -G ? ctx.moveTo(p[0], p[1]) : ctx.lineTo(p[0], p[1]);
+        }
+        ctx.globalAlpha = 0.07; ctx.strokeStyle = PAL[13]; ctx.stroke();
+      }
+    }
+    // ground rings around the main dome
+    for (let k = 1; k <= 6; k++) {
+      ctx.globalAlpha = 0.12 - k * 0.012; ctx.strokeStyle = PAL[13];
+      this.ring(k * 0.32, 0, rot, cx, cy, S); ctx.stroke();
+    }
+    // second, smaller dome (frequency 2) further back on the site
+    const s2 = S * 0.42, c2x = cx - S * 1.55, c2y = cy - S * 0.22;
+    this.drawDome(this.small, c2x, c2y, s2, -t * 0.045, 0.55, null);
+    ctx.globalAlpha = 0.1; ctx.strokeStyle = PAL[13];
+    this.ring(1.15, 0, 0, c2x, c2y, s2); ctx.stroke();
+    // main dome with the scan plane
+    this.drawDome(this.main, cx, cy, S, rot, 1, scan);
+    const rr = Math.sqrt(Math.max(0, 1 - scan * scan));
+    ctx.globalAlpha = 0.5; ctx.strokeStyle = PAL[21]; ctx.lineWidth = 1.2 * scale;
+    this.ring(rr + 0.04, scan, rot, cx, cy, S); ctx.stroke();
+    // plan view (top-down) of the main dome
+    const pcx = W * 0.3, pcy = H * 0.76, pr = H * 0.1;
+    ctx.lineWidth = 0.8 * scale;
+    ctx.globalAlpha = 0.3; ctx.strokeStyle = PAL[14];
+    ctx.beginPath(); ctx.arc(pcx, pcy, pr * 1.06, 0, TAU); ctx.stroke();
+    const c = Math.cos(rot), sn = Math.sin(rot), V = this.main.verts;
+    for (const [a, b] of this.main.edges) {
+      const A = V[a], B = V[b];
+      const ax = A[0] * c - A[2] * sn, az = A[0] * sn + A[2] * c, bx = B[0] * c - B[2] * sn, bz = B[0] * sn + B[2] * c;
+      const hgt = (A[1] + B[1]) / 2;
+      ctx.globalAlpha = 0.1 + 0.35 * hgt; ctx.strokeStyle = PAL[Math.round(12 + 8 * hgt)];
+      ctx.beginPath(); ctx.moveTo(pcx + ax * pr, pcy + az * pr); ctx.lineTo(pcx + bx * pr, pcy + bz * pr); ctx.stroke();
+    }
+    // scan contour in plan
+    ctx.globalAlpha = 0.6; ctx.strokeStyle = PAL[21];
+    ctx.beginPath(); ctx.arc(pcx, pcy, rr * pr, 0, TAU); ctx.stroke();
+    this._scan = scan; this._cx = cx; this._cy = cy; this._plan = [pcx, pcy, pr]; this._small = [c2x, c2y, s2];
+  },
+  drawOver(t) {
+    if (!SETTINGS.math) return;
+    const o = octx, cx = this._cx, cy = this._cy, S = this.S;
+    o.strokeStyle = PAL[14]; o.fillStyle = PAL[16]; o.lineWidth = 0.8 * scale;
+    o.font = MONO(10.5); o.textBaseline = 'middle';
+    // diameter dimension line below the dome
+    const L = this.project([-1, 0, 0], 0, cx, cy, S), R = this.project([1, 0, 0], 0, cx, cy, S);
+    const y = cy + S * 0.62;
+    o.globalAlpha = 0.45;
+    o.beginPath(); o.moveTo(L[0], y); o.lineTo(R[0], y);
+    o.moveTo(L[0], y - 6 * scale); o.lineTo(L[0], y + 6 * scale); o.moveTo(R[0], y - 6 * scale); o.lineTo(R[0], y + 6 * scale);
+    o.stroke();
+    o.globalAlpha = 0.7; o.textAlign = 'center';
+    o.fillText('Ø = 2r', (L[0] + R[0]) / 2, y + 14 * scale);
+    // height dimension at the right
+    const top = this.project([0, 1, 0], 0, cx, cy, S), x = R[0] + 40 * scale;
+    o.globalAlpha = 0.45;
+    o.beginPath(); o.moveTo(x, top[1]); o.lineTo(x, cy);
+    o.moveTo(x - 6 * scale, top[1]); o.lineTo(x + 6 * scale, top[1]); o.moveTo(x - 6 * scale, cy); o.lineTo(x + 6 * scale, cy);
+    o.stroke();
+    o.globalAlpha = 0.7; o.textAlign = 'left';
+    o.fillText('h = r', x + 10 * scale, top[1]);
+    const sp = this.project([0, this._scan, 0], 0, cx, cy, S);
+    o.fillText(`scan  y/r = ${this._scan.toFixed(3)}`, x + 10 * scale, sp[1]);
+    o.globalAlpha = 0.35;
+    o.beginPath(); o.moveTo(x - 4 * scale, sp[1]); o.lineTo(x + 6 * scale, sp[1]); o.stroke();
+    // plan + small dome labels
+    const [pcx, pcy, pr] = this._plan;
+    o.globalAlpha = 0.6; o.textAlign = 'center';
+    o.fillText('PLAN  (top view)', pcx, pcy + pr * 1.06 + 16 * scale);
+    o.globalAlpha = 0.45;
+    o.fillText(`scan circle  r' = r√(1 − y²) = ${Math.sqrt(Math.max(0, 1 - this._scan ** 2)).toFixed(3)} r`, pcx, pcy + pr * 1.06 + 32 * scale);
+    const [sx, sy, ss] = this._small;
+    o.globalAlpha = 0.55;
+    o.fillText(`ν = 2 · V ${this.small.V} · E ${this.small.E} · F ${this.small.F}`, sx, sy + ss * 0.55 + 18 * scale);
+  },
+  hud() { return ['strut lengths from chord = 2r sin(α/2)']; }
+};
+
+
+// ===================== ENGINE (shared) =====================
+const THEMES = {
+  grey:  { hue: 220, sat: 7 },
+  warm:  { hue: 30, sat: 45 },
+  green: { hue: 140, sat: 85 },
+  ice:   { hue: 190, sat: 90 },
+  amber: { hue: 36,  sat: 95 }
+};
+const theme = THEMES[SETTINGS.theme] || THEMES.grey;
+
+const LEVELS = 24, PAL = [], RGB = [];
+function hsl2rgb(h, s, l) {
+  s /= 100; l /= 100;
+  const k = n => (n + h / 30) % 12, a = s * Math.min(l, 1 - l);
+  const f = n => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+  return [Math.round(f(0) * 255), Math.round(f(8) * 255), Math.round(f(4) * 255)];
+}
+for (let i = 0; i < LEVELS; i++) {
+  const t = i / (LEVELS - 1);
+  const s = Math.round(theme.sat * (1 - t * 0.78)), l = Math.round(18 + t * 72);
+  PAL.push(`hsl(${theme.hue},${s}%,${l}%)`);
+  RGB.push(hsl2rgb(theme.hue, s, l));
+}
+const shade = (t, a = 1) => {
+  const i = Math.max(0, Math.min(LEVELS - 1, Math.round(t * (LEVELS - 1))));
+  const c = RGB[i];
+  return `rgba(${c[0]},${c[1]},${c[2]},${a})`;
+};
+
+const base = document.getElementById('base'), over = document.getElementById('over');
+const ctx = base.getContext('2d'), octx = over.getContext('2d');
+let W, H, DPR, scale, bgSprite;
+let mx = 0, my = 0, smx = 0, smy = 0;
+
+const rand = (a, b) => a + Math.random() * (b - a);
+const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+const lerp = (a, b, t) => a + (b - a) * t;
+const TAU = Math.PI * 2;
+const GLYPHS = Array.from('01∂∫∇∑∏πλθφψΩμνσ∞≈≡≠≤≥√Δ±×∈∀∃ℏ{}<>=+-*/^|()[]');
+const pick = () => GLYPHS[(Math.random() * GLYPHS.length) | 0];
+// colour ramps for the realistic scenes: stops = [[t, [r,g,b]], ...]
+const ramp = (stops, t) => {
+  t = clamp(t, 0, 1);
+  for (let i = 1; i < stops.length; i++) if (t <= stops[i][0]) {
+    const [t0, c0] = stops[i - 1], [t1, c1] = stops[i], f = (t - t0) / (t1 - t0 || 1);
+    return [c0[0] + (c1[0] - c0[0]) * f, c0[1] + (c1[1] - c0[1]) * f, c0[2] + (c1[2] - c0[2]) * f];
+  }
+  return stops[stops.length - 1][1];
+};
+const mixc = (a, b, f) => [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f];
+const rgba = (c, a = 1) => `rgba(${c[0] | 0},${c[1] | 0},${c[2] | 0},${a})`;
+const toGrey = c => { const l = 0.3 * c[0] + 0.59 * c[1] + 0.11 * c[2]; return [l * 0.97, l, l * 1.04]; };
+const DARK = l => `hsl(${theme.hue},${Math.min(theme.sat, 10)}%,${l}%)`;   // near-black silhouette fill
+// deterministic pseudo-random from an integer (stable shapes every frame)
+const hash = n => { const x = Math.sin(n * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); };
+const MONO = s => `${(s * scale).toFixed(1)}px Consolas, "Cambria Math", "Segoe UI Symbol", "Courier New", monospace`;
+const MATHF = s => `italic ${(s * scale).toFixed(1)}px "Cambria Math", "Times New Roman", serif`;
+
+// Improved Perlin noise (3D)
+const PERM = new Uint8Array(512);
+(() => {
+  const p = []; for (let i = 0; i < 256; i++) p.push(i);
+  for (let i = 255; i > 0; i--) { const j = (Math.random() * (i + 1)) | 0; [p[i], p[j]] = [p[j], p[i]]; }
+  for (let i = 0; i < 512; i++) PERM[i] = p[i & 255];
+})();
+function noise3(x, y, z) {
+  const X = Math.floor(x) & 255, Y = Math.floor(y) & 255, Z = Math.floor(z) & 255;
+  x -= Math.floor(x); y -= Math.floor(y); z -= Math.floor(z);
+  const fd = t => t * t * t * (t * (t * 6 - 15) + 10);
+  const u = fd(x), v = fd(y), w = fd(z);
+  const grad = (h, x, y, z) => {
+    h &= 15; const a = h < 8 ? x : y, b = h < 4 ? y : (h === 12 || h === 14) ? x : z;
+    return ((h & 1) ? -a : a) + ((h & 2) ? -b : b);
+  };
+  const A = PERM[X] + Y, AA = PERM[A] + Z, AB = PERM[A + 1] + Z;
+  const B = PERM[X + 1] + Y, BA = PERM[B] + Z, BB = PERM[B + 1] + Z;
+  return lerp(
+    lerp(lerp(grad(PERM[AA], x, y, z), grad(PERM[BA], x - 1, y, z), u),
+         lerp(grad(PERM[AB], x, y - 1, z), grad(PERM[BB], x - 1, y - 1, z), u), v),
+    lerp(lerp(grad(PERM[AA + 1], x, y, z - 1), grad(PERM[BA + 1], x - 1, y, z - 1), u),
+         lerp(grad(PERM[AB + 1], x, y - 1, z - 1), grad(PERM[BB + 1], x - 1, y - 1, z - 1), u), v), w);
+}
+
+// Background: dark vertical gradient + soft glow at the scene's focus + vignette
+function makeBg() {
+  const c = document.createElement('canvas');
+  c.width = base.width; c.height = base.height;
+  const g = c.getContext('2d');
+  g.setTransform(DPR, 0, 0, DPR, 0, 0);
+  const s = Math.min(theme.sat, 12), h = theme.hue;
+  const lin = g.createLinearGradient(0, 0, 0, H);
+  lin.addColorStop(0, `hsl(${h},${s}%,7%)`);
+  lin.addColorStop(1, `hsl(${h},${s}%,2.5%)`);
+  g.fillStyle = lin; g.fillRect(0, 0, W, H);
+  const fx = SCENE.focus[0] * W, fy = SCENE.focus[1] * H;
+  const rad = g.createRadialGradient(fx, fy, 0, fx, fy, Math.max(W, H) * 0.65);
+  rad.addColorStop(0, `hsla(${h},${s}%,30%,${SCENE.glow ?? 0.28})`);
+  rad.addColorStop(0.35, `hsla(${h},${s}%,16%,0.16)`);
+  rad.addColorStop(1, `hsla(${h},${s}%,0%,0)`);
+  g.fillStyle = rad; g.fillRect(0, 0, W, H);
+  const vig = g.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.35, W / 2, H / 2, Math.max(W, H) * 0.75);
+  vig.addColorStop(0, 'rgba(0,0,0,0)');
+  vig.addColorStop(1, 'rgba(0,0,0,0.55)');
+  g.fillStyle = vig; g.fillRect(0, 0, W, H);
+  if (SCENE.ambient !== false) {
+    // faint graph-paper dots, with a small cross every fourth point
+    const sp = 46 * scale;
+    g.fillStyle = PAL[14]; g.strokeStyle = PAL[14]; g.lineWidth = 0.8 * scale;
+    for (let i = 0, x = sp / 2; x < W; x += sp, i++) {
+      for (let j = 0, y = sp / 2; y < H; y += sp, j++) {
+        if (i % 4 === 0 && j % 4 === 0) {
+          g.globalAlpha = 0.13;
+          g.beginPath(); g.moveTo(x - 3 * scale, y); g.lineTo(x + 3 * scale, y); g.moveTo(x, y - 3 * scale); g.lineTo(x, y + 3 * scale); g.stroke();
+        } else { g.globalAlpha = 0.08; g.fillRect(x - 0.6 * scale, y - 0.6 * scale, 1.2 * scale, 1.2 * scale); }
+      }
+    }
+    // rulers along the top and bottom edges
+    g.globalAlpha = 0.16;
+    g.beginPath();
+    for (let k = 0, x = 0; x < W; x += 10 * scale, k++) {
+      const L = (k % 10 === 0 ? 9 : k % 5 === 0 ? 5 : 2.5) * scale;
+      g.moveTo(x, 0); g.lineTo(x, L); g.moveTo(x, H); g.lineTo(x, H - L);
+    }
+    g.stroke();
+    // corner crop marks
+    g.globalAlpha = 0.25;
+    const m = 18 * scale, q = 14 * scale;
+    g.beginPath();
+    for (const [x, y, sx, sy] of [[m, m, 1, 1], [W - m, m, -1, 1], [m, H - m, 1, -1], [W - m, H - m, -1, -1]]) {
+      g.moveTo(x, y + sy * q); g.lineTo(x, y); g.lineTo(x + sx * q, y);
+    }
+    g.stroke();
+    g.globalAlpha = 1;
+  }
+  return c;
+}
+
+// drifting faint characters, like dust in the light
+const dust = [];
+function drawDust(dt) {
+  if (SCENE.dust === false) return;
+  if (!dust.length) for (let i = 0; i < 30; i++) dust.push({ x: Math.random(), y: Math.random(), vx: rand(-0.004, 0.004), vy: rand(-0.006, -0.0015), g: pick(), a: rand(0.07, 0.18), s: rand(9, 12) });
+  const o = octx;
+  o.save(); o.textAlign = 'center'; o.textBaseline = 'middle'; o.fillStyle = PAL[16];
+  for (const d of dust) {
+    d.x += d.vx * dt; d.y += d.vy * dt;
+    if (d.y < -0.02) { d.y = 1.02; d.x = Math.random(); d.g = pick(); }
+    if (d.x < -0.02) d.x = 1.02; if (d.x > 1.02) d.x = -0.02;
+    o.globalAlpha = d.a; o.font = MONO(d.s);
+    o.fillText(d.g, d.x * W, d.y * H);
+  }
+  o.restore();
+}
+
+// ---------- Overlay: equations typed out + top-right readout ----------
+const EQ_ANCHORS = SCENE.anchors || [[0.30, 0.12], [0.58, 0.08], [0.26, 0.87], [0.60, 0.93], [0.34, 0.32], [0.74, 0.80]];
+const eqSlots = [{ eq: -1, anchor: -1, age: 0, dur: 0 }, { eq: -1, anchor: -1, age: -5, dur: 0 }];
+let eqNext = (Math.random() * SCENE.eqs.length) | 0;
+function eqAssign(s) {
+  s.eq = eqNext; eqNext = (eqNext + 1) % SCENE.eqs.length;
+  const used = eqSlots.map(o => o.anchor);
+  let a; do { a = (Math.random() * EQ_ANCHORS.length) | 0; } while (used.includes(a));
+  s.anchor = a;
+  s.dur = SCENE.eqs[s.eq].e.length / 20 + 8;
+}
+function drawOverlay(t, dt) {
+  if (!SETTINGS.math) return;
+  const o = octx;
+  o.save();
+  o.textBaseline = 'middle';
+  for (const s of eqSlots) {
+    if (s.eq < 0) eqAssign(s);
+    s.age += dt;
+    if (s.age < 0) continue;
+    if (s.age > s.dur) { eqAssign(s); s.age = -2; continue; }
+    const q = SCENE.eqs[s.eq], n = Math.min(q.e.length, Math.floor(s.age * 20));
+    const fade = clamp((s.dur - s.age) / 1.5, 0, 1) * clamp(s.age * 2, 0, 1);
+    const x = EQ_ANCHORS[s.anchor][0] * W, y = EQ_ANCHORS[s.anchor][1] * H;
+    o.textAlign = 'left';
+    o.font = MATHF(15.5);
+    o.globalAlpha = 0.8 * fade; o.fillStyle = PAL[20];
+    const shown = q.e.slice(0, n);
+    o.fillText(shown, x, y);
+    if (n < q.e.length) {
+      const w = o.measureText(shown).width;
+      o.fillRect(x + w + 3 * scale, y - 8 * scale, 1.4 * scale, 16 * scale);
+    } else {
+      o.font = MONO(10.5); o.fillStyle = PAL[13];
+      o.globalAlpha = 0.6 * fade * clamp((s.age - q.e.length / 20) * 1.5, 0, 1);
+      o.fillText('— ' + q.n, x, y + 20 * scale);
+    }
+  }
+  o.font = MONO(10.5); o.textAlign = 'right'; o.textBaseline = 'top';
+  const hx = W - 28 * scale; let hy = 26 * scale;
+  const lines = [[SCENE.title, 0.62, 13], [SCENE.sub, 0.48, 13], ...(SCENE.hud ? SCENE.hud(t).map(l => [l, 0.48, 13]) : []),
+                 [`t = ${t.toFixed(2).padStart(9, '0')} s`, 0.75, 20]];
+  for (const [txt, al, c] of lines) { o.globalAlpha = al; o.fillStyle = PAL[c]; o.fillText(txt, hx, hy); hy += 16 * scale; }
+  o.restore();
+}
+
+// ---------- Boot ----------
+function setup() {
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  W = window.innerWidth; H = window.innerHeight;
+  for (const c of [base, over]) { c.width = Math.round(W * DPR); c.height = Math.round(H * DPR); }
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  octx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  scale = Math.max(0.6, Math.min(W, H) / 1080);
+  bgSprite = makeBg();
+  ctx.drawImage(bgSprite, 0, 0, W, H);
+  SCENE.init();
+}
+
+let last = performance.now(), acc = 0, T0 = performance.now();
+function loop(now) {
+  requestAnimationFrame(loop);
+  acc += now - last; last = now;
+  if (acc < 1000 / SETTINGS.fps - 1) return;
+  const dt = Math.min(acc / 1000, 0.1);
+  acc = 0;
+  const t = (now - T0) / 1000;
+  smx += (mx - smx) * 0.05; smy += (my - smy) * 0.05;
+  const off = SETTINGS.parallax ? 12 * scale : 0;
+  const ox = smx * off, oy = smy * off;
+  if (SCENE.update) SCENE.update(dt, t);
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.globalAlpha = SCENE.trail || 1;
+  ctx.drawImage(bgSprite, 0, 0, W, H);
+  ctx.globalAlpha = 1;
+  SCENE.draw(t, ox, oy);
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.globalAlpha = 1;
+  octx.clearRect(0, 0, W, H);
+  drawDust(dt);
+  if (SCENE.drawOver) { octx.save(); SCENE.drawOver(t, ox, oy); octx.restore(); }
+  drawOverlay(t, dt);
+}
+window.addEventListener('mousemove', e => { mx = (e.clientX / W) * 2 - 1; my = (e.clientY / H) * 2 - 1; });
+let rt;
+window.addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(setup, 200); });
+setup();
+requestAnimationFrame(loop);
+
+</script>
+</body>
+</html>

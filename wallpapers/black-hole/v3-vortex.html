@@ -1,0 +1,588 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ASCII Singularity</title>
+<!--
+  ASCII Singularity — Vortex (top-down) — live wallpaper for Lively Wallpaper
+  Add it in Lively: click "+" → choose this file.
+  Tweak the SETTINGS block below with Notepad.
+-->
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { display: block; width: 100vw; height: 100vh; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// ===================== SETTINGS =====================
+const SETTINGS = {
+  theme: 'grey',    // 'grey' | 'green' | 'ice' | 'amber'
+  centerX: 0.5,     // 0.5 = centred, larger = further right
+  centerY: 0.42,    // where the outer rings are centred (the hole sits a bit lower)
+  holeSize: 1.0,    // size of the black hole
+  density: 1.0,     // amount of streaks and characters (0.5 – 1.5)
+  viewAngle: 80,    // degrees above the disc; lower = flatter, more side-on
+  wellDepth: 2.4,   // how deep the rings sink into the hole (0 = flat disc)
+  lensGlow: 0.15,   // brightness of the light bent under the hole (0 – 1)
+  haloSize: 1.38,   // how far the bent light arcs reach around the hole
+  haloCount: 120,   // characters riding the bent-light arcs
+  fps: 30,          // frame cap; 30 keeps the GPU load low
+  parallax: true,   // the whole scene shifts gently with the mouse
+  breathing: true,   // slow pulse on the glow around the hole
+  math: true       // equations, axes, angle readout (false = plain version)
+};
+// ====================================================
+
+const THEMES = {
+  grey:  { hue: 220, sat: 7,  ring: '#f3f5f8' },
+  green: { hue: 140, sat: 85, ring: '#eafff2' },
+  ice:   { hue: 190, sat: 90, ring: '#effcff' },
+  amber: { hue: 36,  sat: 95, ring: '#fff5e3' }
+};
+const theme = THEMES[SETTINGS.theme] || THEMES.green;
+const GLYPHS = Array.from('01∂∫∇∑∏πλθφψΩμνσ∞≈≡≠≤≥√Δ±×∈∀∃ℏ{}<>=+-*/^|()[]');
+const STAR_GLYPHS = ['.', '.', '.', '+', '·'];
+
+const cvs = document.getElementById('c');
+const ctx = cvs.getContext('2d');
+
+// Colour ramp: dim saturated colour -> near-white hot
+const LEVELS = 24, PAL = [];
+for (let i = 0; i < LEVELS; i++) {
+  const t = i / (LEVELS - 1);
+  PAL.push(`hsl(${theme.hue},${Math.round(theme.sat * (1 - t * 0.78))}%,${Math.round(18 + t * 72)}%)`);
+}
+const BUCKET_PAL = [5, 9, 13, 16, 19, 22];
+const CHUNK_ALPHA = [0.08, 0.22, 0.45, 0.85];
+
+const TILT = -0.16;
+const cosT = Math.cos(TILT), sinT = Math.sin(TILT);
+const E = SETTINGS.viewAngle * Math.PI / 180;
+const sinE = Math.sin(E), cosE = Math.cos(E);
+
+const rand = (a, b) => a + Math.random() * (b - a);
+const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+const pick = () => GLYPHS[(Math.random() * GLYPHS.length) | 0];
+
+let W, H, DPR, R, scale, rIn, rOut, NR, rings, FONTS, STAR_FONT;
+let glowSprite, sphereSprite, farLayer, nearLayer;
+let streaks = [], halo = [], fallers = [], stars = [];
+let mx = 0, my = 0, smx = 0, smy = 0;
+let bgSprite;
+const P = { x: 0, y: 0 };
+// Inner rings dim on the near side so they don't hide the throat
+const nearDim = i => { const c = NR * 0.2; return i < c ? 0.3 + 0.7 * (i / c) : 1; };
+
+// Gravity well: rings sink deeper the closer they are to the hole
+const depth = r => R * SETTINGS.wellDepth * Math.pow(rIn / r, 0.9);
+
+// Project a point on ring radius r, angle a, into screen space around (cx, cy)
+function proj(r, a, cx, cy) {
+  const x = r * Math.cos(a), y = r * Math.sin(a);
+  const sx = x, sy = -y * sinE + depth(r) * cosE;
+  P.x = cx + sx * cosT - sy * sinT;
+  P.y = cy + sx * sinT + sy * cosT;
+  return P;
+}
+function holeCenter(cx, cy) {
+  const d = depth(rIn) * 1.08 * cosE + 0.0001;
+  return { x: cx - d * sinT, y: cy + d * cosT };
+}
+
+function spawnStreak(s) {
+  s.i = Math.min(NR - 1, Math.floor(NR * Math.pow(Math.random(), 1.8)));
+  s.r = rings[s.i];
+  s.a = Math.random() * Math.PI * 2;
+  s.L = Math.min(1.7, rand(0.6, 4) * R / s.r);   // tail length in radians
+  s.hasGlyph = Math.random() < 0.75;
+  s.g = pick(); s.t = rand(2, 12);
+  s.b = rand(0.5, 1);
+  s.span = rand(7, 18); s.age = Math.random() * s.span;
+  return s;
+}
+
+function makeLayer(cx, cy, far) {
+  const c = document.createElement('canvas');
+  c.width = cvs.width; c.height = cvs.height;
+  const g = c.getContext('2d');
+  g.setTransform(DPR, 0, 0, DPR, 0, 0);
+  g.lineWidth = 0.9 * scale;
+  const STEPS = 220;
+  for (let i = 0; i < NR; i++) {
+    const r = rings[i], k = 1 - i / NR;
+    g.strokeStyle = PAL[Math.round(4 + 12 * k)];
+    g.globalAlpha = (0.05 + 0.2 * k * k) * (far ? 1 : nearDim(i));
+    g.beginPath();
+    let pen = false;
+    for (let s = 0; s <= STEPS; s++) {
+      const a = (s / STEPS) * Math.PI * 2;
+      const isFar = Math.sin(a) > 0;
+      if (isFar !== far) { pen = false; continue; }
+      const p = proj(r, a, cx, cy);
+      if (pen) g.lineTo(p.x, p.y); else { g.moveTo(p.x, p.y); pen = true; }
+    }
+    g.stroke();
+  }
+  if (far) {
+    // Lensed rings hugging the hole: the far side of the disc bent over the top
+    const hc = holeCenter(cx, cy);
+    const nk = Math.max(6, Math.round((SETTINGS.haloSize - 1) / 0.065));
+    for (let k = 0; k < nk; k++) {
+      const rr = R * (1.06 + k * 0.065);
+      g.globalAlpha = Math.max(0.03, 0.22 - k * 0.025);
+      g.strokeStyle = PAL[Math.max(6, 14 - k)];
+      g.beginPath(); g.arc(hc.x, hc.y, rr, Math.PI * 1.02, Math.PI * 1.98); g.stroke();
+      g.globalAlpha = 0.06 + 0.25 * SETTINGS.lensGlow;
+      g.beginPath(); g.arc(hc.x, hc.y, rr, Math.PI * 0.08, Math.PI * 0.92); g.stroke();
+    }
+  }
+  return c;
+}
+
+function makeGlow() {
+  const size = Math.ceil(R * 6), h = size / 2;
+  const c = document.createElement('canvas');
+  c.width = c.height = size;
+  const g = c.getContext('2d');
+  const grd = g.createRadialGradient(h, h, 0, h, h, h);
+  const col = a => `hsla(${theme.hue},${theme.sat}%,60%,${a})`;
+  const rI = R / h;
+  grd.addColorStop(0, col(0));
+  grd.addColorStop(rI - 0.02, col(0));
+  grd.addColorStop(rI, col(0.9));
+  grd.addColorStop(Math.min(1, rI + 0.07), col(0.3));
+  grd.addColorStop(Math.min(1, rI + 0.3), col(0.06));
+  grd.addColorStop(1, col(0));
+  g.fillStyle = grd; g.fillRect(0, 0, size, size);
+  return c;
+}
+
+function makeSphere() {
+  const size = Math.ceil(R * 2 + 4), h = size / 2;
+  const c = document.createElement('canvas');
+  c.width = c.height = size;
+  const g = c.getContext('2d');
+  const grd = g.createRadialGradient(h, h - R * 0.12, 0, h, h, R);
+  grd.addColorStop(0, '#000');
+  grd.addColorStop(0.72, '#000');
+  grd.addColorStop(0.92, `hsl(${theme.hue},${Math.round(theme.sat * 0.5)}%,4%)`);
+  grd.addColorStop(1, `hsl(${theme.hue},${Math.round(theme.sat * 0.75)}%,13%)`);
+  g.fillStyle = grd;
+  g.beginPath(); g.arc(h, h, R, 0, Math.PI * 2); g.fill();
+  return c;
+}
+
+function makeBackground(cx, cy) {
+  // Dark gradient: charcoal near the hole, fading to near-black at the edges
+  const c = document.createElement('canvas');
+  c.width = cvs.width; c.height = cvs.height;
+  const g = c.getContext('2d');
+  g.setTransform(DPR, 0, 0, DPR, 0, 0);
+  const s = Math.min(theme.sat, 12);
+  const lin = g.createLinearGradient(0, 0, 0, H);
+  lin.addColorStop(0, `hsl(${theme.hue},${s}%,7%)`);
+  lin.addColorStop(1, `hsl(${theme.hue},${s}%,2.5%)`);
+  g.fillStyle = lin; g.fillRect(0, 0, W, H);
+  const hc = holeCenter(cx, cy);
+  const rad = g.createRadialGradient(hc.x, hc.y, 0, hc.x, hc.y, Math.max(W, H) * 0.65);
+  rad.addColorStop(0, `hsla(${theme.hue},${s}%,30%,0.32)`);
+  rad.addColorStop(0.35, `hsla(${theme.hue},${s}%,16%,0.18)`);
+  rad.addColorStop(1, `hsla(${theme.hue},${s}%,0%,0)`);
+  g.fillStyle = rad; g.fillRect(0, 0, W, H);
+  const vig = g.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.35, W / 2, H / 2, Math.max(W, H) * 0.75);
+  vig.addColorStop(0, 'rgba(0,0,0,0)');
+  vig.addColorStop(1, 'rgba(0,0,0,0.55)');
+  g.fillStyle = vig; g.fillRect(0, 0, W, H);
+  return c;
+}
+
+function setup() {
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  W = window.innerWidth; H = window.innerHeight;
+  cvs.width = Math.round(W * DPR); cvs.height = Math.round(H * DPR);
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+
+  scale = Math.max(0.6, Math.min(W, H) / 1080);
+  R = Math.min(W, H) * 0.085 * SETTINGS.holeSize;
+  rIn = R * 1.45;
+  rOut = Math.max(W, H) * 0.8;
+  NR = 64;
+  rings = [];
+  for (let i = 0; i < NR; i++) rings.push(rIn * Math.pow(rOut / rIn, Math.pow(i / (NR - 1), 1.15)));
+
+  FONTS = [11, 13.5, 16].map(s => `${(s * scale).toFixed(1)}px Consolas, "Cambria Math", "Segoe UI Symbol", "Courier New", monospace`);
+  STAR_FONT = `${(11 * scale).toFixed(1)}px Consolas, "Cambria Math", "Segoe UI Symbol", "Courier New", monospace`;
+
+  const cx0 = W * SETTINGS.centerX, cy0 = H * SETTINGS.centerY;
+  farLayer = makeLayer(cx0, cy0, true);
+  nearLayer = makeLayer(cx0, cy0, false);
+  glowSprite = makeGlow();
+  sphereSprite = makeSphere();
+  bgSprite = makeBackground(cx0, cy0);
+
+  const n = clamp(Math.round(700 * SETTINGS.density * (W * H) / (1920 * 1080)), 250, 1400);
+  streaks = [];
+  for (let i = 0; i < n; i++) streaks.push(spawnStreak({}));
+
+  halo = [];
+  for (let i = 0; i < SETTINGS.haloCount; i++) {
+    halo.push({ r: R * rand(1.06, SETTINGS.haloSize), a: Math.random() * Math.PI * 2, L: rand(0.15, 0.6),
+                g: pick(), t: rand(2, 12), b: rand(0.5, 1), hasGlyph: Math.random() < 0.5 });
+  }
+
+  fallers = [];
+  for (let i = 0; i < 36; i++) fallers.push({ a: Math.random() * Math.PI * 2, k: Math.random(), sp: rand(0.12, 0.25), g: pick() });
+
+  stars = [];
+  const ns = Math.round(160 * (W * H) / (1920 * 1080));
+  for (let i = 0; i < ns; i++) {
+    stars.push({ x: Math.random() * W, y: Math.random() * H, g: STAR_GLYPHS[(Math.random() * STAR_GLYPHS.length) | 0],
+                 a: rand(0.15, 0.45), ph: Math.random() * Math.PI * 2, sp: rand(0.15, 0.4) });
+  }
+}
+
+function update(dt) {
+  for (const s of streaks) {
+    s.a += 0.85 * Math.pow(rIn / s.r, 1.5) * dt;   // inner rings spin faster
+    s.age += dt;
+    if (s.age > s.span) { spawnStreak(s); s.age = 0; }
+    s.t -= dt;
+    if (s.t <= 0) { s.g = pick(); s.t = rand(3, 12); }
+  }
+  for (const h of halo) {
+    h.a -= 0.4 * dt;
+    h.t -= dt;
+    if (h.t <= 0) { h.g = pick(); h.t = rand(3, 12); }
+  }
+  for (const f of fallers) {
+    f.k += f.sp * dt;
+    f.a -= (0.6 + f.k * 2.5) * dt;
+    if (f.k >= 1) { f.k = 0; f.a = Math.random() * Math.PI * 2; f.g = pick(); }
+  }
+}
+
+// Draw all streak tails for one side (far/near), batched by colour bucket and fade chunk
+function drawStreaks(cx, cy, far) {
+  const paths = [];
+  for (let b = 0; b < 6; b++) paths.push([new Path2D(), new Path2D(), new Path2D(), new Path2D()]);
+  const SEG = 8;
+  const heads = [];
+  for (const s of streaks) {
+    const env = Math.sin(Math.PI * s.age / s.span);
+    const k = 1 - s.i / NR;
+    const bri = s.b * (0.2 + 0.8 * Math.pow(k, 1.3)) * (0.78 - 0.28 * Math.cos(s.a)) * env * (far ? 1 : nearDim(s.i));
+    const bk = clamp(Math.round(bri * 5), 0, 5);
+    let px = 0, py = 0;
+    for (let j = 0; j <= SEG; j++) {
+      const a = s.a - s.L * (1 - j / SEG);
+      const p = proj(s.r, a, cx, cy);
+      if (j > 0) {
+        const mid = a - s.L / SEG / 2;
+        if ((Math.sin(mid) > 0) === far) {
+          const path = paths[bk][Math.min(3, ((j - 1) / 2) | 0)];
+          path.moveTo(px, py); path.lineTo(p.x, p.y);
+        }
+      }
+      px = p.x; py = p.y;
+    }
+    if (s.hasGlyph && (Math.sin(s.a) > 0) === far && bri > 0.08) {
+      heads.push(s.i < NR * 0.3 ? 0 : s.i < NR * 0.65 ? 1 : 2, px, py, Math.min(5, bk + 2), Math.min(1, 0.45 + bri), s.g);
+    }
+  }
+  for (let b = 0; b < 6; b++) {
+    ctx.strokeStyle = PAL[BUCKET_PAL[b]];
+    ctx.lineWidth = (0.7 + b * 0.16) * scale;
+    for (let c = 0; c < 4; c++) {
+      ctx.globalAlpha = CHUNK_ALPHA[c];
+      ctx.stroke(paths[b][c]);
+    }
+  }
+  for (let f = 0; f < 3; f++) {
+    ctx.font = FONTS[f];
+    for (let h = 0; h < heads.length; h += 6) {
+      if (heads[h] !== f) continue;
+      ctx.globalAlpha = heads[h + 4];
+      ctx.fillStyle = PAL[BUCKET_PAL[heads[h + 3]]];
+      ctx.fillText(heads[h + 5], heads[h + 1], heads[h + 2]);
+    }
+  }
+}
+
+function render(t) {
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.globalAlpha = 1;
+  ctx.drawImage(bgSprite, 0, 0, W, H);
+
+  smx += (mx - smx) * 0.05; smy += (my - smy) * 0.05;
+  const off = SETTINGS.parallax ? 14 * scale : 0;
+  const ox = smx * off, oy = smy * off;
+  const cx = W * SETTINGS.centerX + ox, cy = H * SETTINGS.centerY + oy;
+  const hc = holeCenter(cx, cy);
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+
+  // Background stars, pushed outward near the hole (lensing)
+  ctx.font = STAR_FONT;
+  ctx.fillStyle = PAL[13];
+  const so = SETTINGS.parallax ? -5 * scale : 0;
+  for (const s of stars) {
+    let x = s.x + smx * so, y = s.y + smy * so;
+    const dx = x - hc.x, dy = y - hc.y, d = Math.hypot(dx, dy) || 1;
+    if (d < R * 1.6) continue;
+    const push = Math.min(R * 1.2, (R * R * 1.4) / d);
+    x += dx / d * push; y += dy / d * push;
+    ctx.globalAlpha = s.a * (0.65 + 0.35 * Math.sin(t * s.sp + s.ph));
+    ctx.fillText(s.g, x, y);
+  }
+
+  ctx.globalCompositeOperation = 'lighter';
+
+  // Far side: guide rings, streaks, lensed halo
+  ctx.globalAlpha = 1;
+  ctx.drawImage(farLayer, ox, oy, W, H);
+  drawStreaks(cx, cy, true);
+
+  ctx.font = FONTS[0];
+  ctx.lineWidth = 1 * scale;
+  for (const h of halo) {
+    const top = Math.max(0, -Math.sin(h.a));
+    const w = SETTINGS.lensGlow + (1 - SETTINGS.lensGlow) * top;
+    const lv = BUCKET_PAL[clamp(Math.round(h.b * w * 5), 0, 5)];
+    ctx.strokeStyle = ctx.fillStyle = PAL[lv];
+    ctx.globalAlpha = 0.5 * w;
+    ctx.beginPath(); ctx.arc(hc.x, hc.y, h.r, h.a, h.a + h.L); ctx.stroke();
+    if (h.hasGlyph) {
+      ctx.globalAlpha = 0.2 + 0.7 * w;
+      ctx.fillText(h.g, hc.x + Math.cos(h.a) * h.r, hc.y + Math.sin(h.a) * h.r);
+    }
+  }
+
+  // Glow
+  const breath = SETTINGS.breathing ? 0.75 + 0.25 * Math.sin(t * 0.55) : 0.9;
+  ctx.globalAlpha = 0.45 * breath;
+  const gs = glowSprite.width;
+  ctx.drawImage(glowSprite, hc.x - gs / 2, hc.y - gs / 2);
+
+  // Event horizon with depth: shaded sphere + a throat that recedes into it
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.globalAlpha = 1;
+  const ss = sphereSprite.width;
+  ctx.drawImage(sphereSprite, hc.x - ss / 2, hc.y - ss / 2);
+
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.lineWidth = 0.9 * scale;
+  for (let k = 1; k <= 11; k++) {
+    const f = Math.pow(1 - k / 12, 1.25);
+    const rr = R * 0.94 * f;
+    const lift = R * 0.22 * (1 - f);
+    ctx.globalAlpha = 0.32 * Math.pow(f, 1.4);
+    ctx.strokeStyle = PAL[10];
+    ctx.beginPath();
+    ctx.ellipse(hc.x + lift * sinT, hc.y - lift * cosT, rr, rr * 0.86, TILT, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  // Characters falling down the throat, shrinking and fading
+  for (const f of fallers) {
+    const q = Math.pow(1 - f.k, 1.3);
+    const rr = R * 0.9 * q, lift = R * 0.22 * (1 - q);
+    const x = hc.x + lift * sinT + Math.cos(f.a) * rr;
+    const y = hc.y - lift * cosT + Math.sin(f.a) * rr * 0.86;
+    ctx.globalAlpha = 0.75 * q;
+    ctx.fillStyle = PAL[14];
+    ctx.font = `${(4 + 9 * q) * scale}px Consolas, "Cambria Math", "Segoe UI Symbol", "Courier New", monospace`;
+    ctx.fillText(f.g, x, y);
+  }
+
+  // Photon ring
+  ctx.globalAlpha = 0.5 + 0.45 * breath;
+  ctx.strokeStyle = theme.ring;
+  ctx.lineWidth = 1.5 * scale;
+  ctx.beginPath(); ctx.arc(hc.x, hc.y, R * 1.015, 0, Math.PI * 2); ctx.stroke();
+
+  // Near side passes in front of the hole
+  ctx.globalAlpha = 1;
+  ctx.drawImage(nearLayer, ox, oy, W, H);
+  drawStreaks(cx, cy, false);
+
+  drawMath(hc, t);
+
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.globalAlpha = 1;
+}
+
+// ===================== MATHEMATICAL OVERLAY =====================
+// Real Schwarzschild black-hole physics, drawn like a technical diagram.
+const M_EQS = [
+  { e: 'ds² = −(1 − rₛ/r) c²dt² + (1 − rₛ/r)⁻¹ dr² + r² dΩ²', n: 'Schwarzschild metric' },
+  { e: 'rₛ = 2GM / c²',                                   n: 'Schwarzschild radius' },
+  { e: 'Gμν + Λgμν = (8πG / c⁴) Tμν',                     n: 'Einstein field equations' },
+  { e: 'Ω(r) = √(GM / r³)',                               n: 'Keplerian orbital frequency' },
+  { e: 'rₚₕ = 3GM / c²',                                  n: 'photon sphere' },
+  { e: 'r(ISCO) = 6GM / c²',                              n: 'innermost stable circular orbit' },
+  { e: 'dτ = √(1 − rₛ/r) dt',                             n: 'gravitational time dilation' },
+  { e: 'T(H) = ħc³ / (8πGMk_B)',                          n: 'Hawking temperature' },
+  { e: 'S = k_B c³ A / (4Għ)',                            n: 'Bekenstein–Hawking entropy' },
+  { e: 'δφ ≈ 4GM / (c² b)',                               n: 'deflection of light' }
+];
+const M_ANCHORS = [[0.30, 0.12], [0.58, 0.08], [0.26, 0.86], [0.62, 0.92], [0.36, 0.34], [0.74, 0.74]];
+const M_slots = [{ eq: -1, anchor: -1, age: 0, dur: 0 }, { eq: -1, anchor: -1, age: -5, dur: 0 }];
+let M_next = (Math.random() * M_EQS.length) | 0, M_last = null;
+
+function M_assign(s) {
+  s.eq = M_next; M_next = (M_next + 1) % M_EQS.length;
+  const used = M_slots.map(o => o.anchor);
+  let a; do { a = (Math.random() * M_ANCHORS.length) | 0; } while (used.includes(a));
+  s.anchor = a;
+  s.dur = M_EQS[s.eq].e.length / 20 + 8;
+}
+
+function drawMath(hc, t) {
+  if (!SETTINGS.math) return;
+  const dt = M_last === null ? 0 : Math.min(0.1, Math.max(0, t - M_last)); M_last = t;
+  ctx.save();
+  ctx.globalCompositeOperation = 'source-over';
+  const ink = PAL[20], dim = PAL[13];
+  const fs = 10.5 * scale;
+  const mono = `${fs.toFixed(1)}px Consolas, "Cambria Math", "Segoe UI Symbol", "Courier New", monospace`;
+  const eqFont = `italic ${(15.5 * scale).toFixed(1)}px "Cambria Math", "Times New Roman", serif`;
+  ctx.lineWidth = 0.8 * scale;
+  ctx.strokeStyle = dim; ctx.fillStyle = dim;
+  ctx.font = mono;
+
+  // Axes through the singularity, ticked in units of rₛ (shadow edge = 3√3/2 rₛ ≈ 2.6 rₛ)
+  const AX = R * 4.6, AY = R * 2.9, gap = R * 1.12;
+  ctx.globalAlpha = 0.32;
+  ctx.setLineDash([2 * scale, 5 * scale]);
+  ctx.beginPath();
+  ctx.moveTo(hc.x - AX, hc.y); ctx.lineTo(hc.x - gap, hc.y);
+  ctx.moveTo(hc.x + gap, hc.y); ctx.lineTo(hc.x + AX, hc.y);
+  ctx.moveTo(hc.x, hc.y - AY); ctx.lineTo(hc.x, hc.y - gap);
+  ctx.moveTo(hc.x, hc.y + gap); ctx.lineTo(hc.x, hc.y + AY);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.beginPath();
+  for (let k = 1; k <= 9; k++) {
+    const d = k * R / 2; if (d > AX) break;
+    const L = (k % 2 === 0 ? 5 : 2.5) * scale;
+    ctx.moveTo(hc.x + d, hc.y - L); ctx.lineTo(hc.x + d, hc.y + L);
+    ctx.moveTo(hc.x - d, hc.y - L); ctx.lineTo(hc.x - d, hc.y + L);
+  }
+  ctx.stroke();
+  ctx.globalAlpha = 0.5;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+  for (let k = 1; k <= 4; k++) ctx.fillText((k * 2.598).toFixed(1), hc.x + k * R, hc.y + 8 * scale);
+  ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+  ctx.fillText('r / rₛ', hc.x + AX + 8 * scale, hc.y);
+
+  // Protractor ring with degree ticks
+  const PR = R * 2.35;
+  ctx.globalAlpha = 0.28;
+  ctx.beginPath(); ctx.arc(hc.x, hc.y, PR, 0, Math.PI * 2); ctx.stroke();
+  ctx.beginPath();
+  for (let d = 0; d < 360; d += 5) {
+    const a = -d * Math.PI / 180, c = Math.cos(a), s = Math.sin(a);
+    const L = (d % 30 === 0 ? 9 : d % 15 === 0 ? 6 : 3.5) * scale;
+    ctx.moveTo(hc.x + c * PR, hc.y + s * PR); ctx.lineTo(hc.x + c * (PR + L), hc.y + s * (PR + L));
+  }
+  ctx.stroke();
+  ctx.globalAlpha = 0.45;
+  ctx.textAlign = 'center';
+  for (let d = 0; d < 360; d += 30) {
+    const a = -d * Math.PI / 180;
+    ctx.fillText(d + '°', hc.x + Math.cos(a) * (PR + 21 * scale), hc.y + Math.sin(a) * (PR + 21 * scale));
+  }
+
+  // Sweeping radius vector with a live angle readout
+  const th = (t * 6) % 360, ta = -th * Math.PI / 180;
+  ctx.globalAlpha = 0.6; ctx.strokeStyle = ink;
+  ctx.beginPath();
+  ctx.moveTo(hc.x + Math.cos(ta) * R * 1.12, hc.y + Math.sin(ta) * R * 1.12);
+  ctx.lineTo(hc.x + Math.cos(ta) * PR, hc.y + Math.sin(ta) * PR);
+  ctx.stroke();
+  ctx.globalAlpha = 0.35;
+  ctx.beginPath(); ctx.arc(hc.x, hc.y, R * 1.85, 0, ta, true); ctx.stroke();
+  ctx.globalAlpha = 0.75; ctx.fillStyle = ink;
+  ctx.textAlign = Math.cos(ta) >= 0 ? 'left' : 'right';
+  const lx = hc.x + Math.cos(ta) * (PR + 40 * scale), ly = hc.y + Math.sin(ta) * (PR + 40 * scale);
+  ctx.fillText(`θ = ${th.toFixed(1).padStart(5, '0')}°`, lx, ly);
+
+  // Leader-line labels
+  ctx.strokeStyle = dim; ctx.fillStyle = PAL[17];
+  const label = (ang, r0, dx, dy, text) => {
+    const px = hc.x + Math.cos(ang) * r0, py = hc.y + Math.sin(ang) * r0;
+    const qx = px + dx, qy = py + dy, sgn = dx > 0 ? 1 : -1;
+    ctx.globalAlpha = 0.45;
+    ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(qx, qy); ctx.lineTo(qx + sgn * 16 * scale, qy); ctx.stroke();
+    ctx.beginPath(); ctx.arc(px, py, 2 * scale, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = 0.7;
+    ctx.textAlign = dx > 0 ? 'left' : 'right';
+    ctx.fillText(text, qx + sgn * 22 * scale, qy);
+  };
+  label(-0.75, R * 1.02, R * 2.0, -R * 1.25, 'photon ring   b = 3√3 GM/c² ≈ 2.6 rₛ');
+  label(2.45, R * 0.55, -R * 2.6, R * 1.75, 'event horizon   r = rₛ = 2GM/c²');
+
+  // Equations typed out one character at a time, two at once
+  for (const s of M_slots) {
+    if (s.eq < 0) M_assign(s);
+    s.age += dt;
+    if (s.age < 0) continue;
+    if (s.age > s.dur) { M_assign(s); s.age = -2; continue; }
+    const q = M_EQS[s.eq], n = Math.min(q.e.length, Math.floor(s.age * 20));
+    const fade = clamp((s.dur - s.age) / 1.5, 0, 1) * clamp(s.age * 2, 0, 1);
+    const x = M_ANCHORS[s.anchor][0] * W, y = M_ANCHORS[s.anchor][1] * H;
+    ctx.textAlign = 'left';
+    ctx.font = eqFont;
+    ctx.globalAlpha = 0.8 * fade; ctx.fillStyle = ink;
+    const shown = q.e.slice(0, n);
+    ctx.fillText(shown, x, y);
+    if (n < q.e.length) {
+      const w = ctx.measureText(shown).width;
+      ctx.fillRect(x + w + 3 * scale, y - 8 * scale, 1.4 * scale, 16 * scale);
+    } else {
+      ctx.font = mono; ctx.fillStyle = dim;
+      ctx.globalAlpha = 0.6 * fade * clamp((s.age - q.e.length / 20) * 1.5, 0, 1);
+      ctx.fillText('— ' + q.n, x, y + 20 * scale);
+    }
+  }
+
+  // Readout, top-right
+  ctx.font = mono; ctx.textAlign = 'right'; ctx.textBaseline = 'top';
+  const hx = W - 28 * scale; let hy = 26 * scale;
+  const lines = [
+    ['SCHWARZSCHILD SOLUTION · a = 0', 0.6],
+    ['M = 4.3 × 10⁶ M⊙   rₛ ≈ 1.27 × 10¹⁰ m', 0.5],
+    [`t = ${t.toFixed(2).padStart(9, '0')} s`, 0.75]
+  ];
+  for (const [txt, al] of lines) { ctx.globalAlpha = al; ctx.fillStyle = al > 0.7 ? ink : dim; ctx.fillText(txt, hx, hy); hy += 16 * scale; }
+
+  ctx.restore();
+}
+// ================================================================
+
+let last = performance.now(), acc = 0;
+function loop(now) {
+  requestAnimationFrame(loop);
+  const frame = 1000 / SETTINGS.fps;
+  acc += now - last; last = now;
+  if (acc < frame - 1) return;
+  const dt = Math.min(acc / 1000, 0.1);
+  acc = 0;
+  update(dt);
+  render(now / 1000);
+}
+
+window.addEventListener('mousemove', e => {
+  mx = (e.clientX / W) * 2 - 1;
+  my = (e.clientY / H) * 2 - 1;
+});
+let rt;
+window.addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(setup, 200); });
+
+setup();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

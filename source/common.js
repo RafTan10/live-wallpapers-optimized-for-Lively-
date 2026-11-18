@@ -1,0 +1,242 @@
+// ===================== ENGINE (shared) =====================
+const THEMES = {
+  grey:  { hue: 220, sat: 7 },
+  warm:  { hue: 30, sat: 45 },
+  green: { hue: 140, sat: 85 },
+  ice:   { hue: 190, sat: 90 },
+  amber: { hue: 36,  sat: 95 }
+};
+const theme = THEMES[SETTINGS.theme] || THEMES.grey;
+
+const LEVELS = 24, PAL = [], RGB = [];
+function hsl2rgb(h, s, l) {
+  s /= 100; l /= 100;
+  const k = n => (n + h / 30) % 12, a = s * Math.min(l, 1 - l);
+  const f = n => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+  return [Math.round(f(0) * 255), Math.round(f(8) * 255), Math.round(f(4) * 255)];
+}
+for (let i = 0; i < LEVELS; i++) {
+  const t = i / (LEVELS - 1);
+  const s = Math.round(theme.sat * (1 - t * 0.78)), l = Math.round(18 + t * 72);
+  PAL.push(`hsl(${theme.hue},${s}%,${l}%)`);
+  RGB.push(hsl2rgb(theme.hue, s, l));
+}
+const shade = (t, a = 1) => {
+  const i = Math.max(0, Math.min(LEVELS - 1, Math.round(t * (LEVELS - 1))));
+  const c = RGB[i];
+  return `rgba(${c[0]},${c[1]},${c[2]},${a})`;
+};
+
+const base = document.getElementById('base'), over = document.getElementById('over');
+const ctx = base.getContext('2d'), octx = over.getContext('2d');
+let W, H, DPR, scale, bgSprite;
+let mx = 0, my = 0, smx = 0, smy = 0;
+
+const rand = (a, b) => a + Math.random() * (b - a);
+const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+const lerp = (a, b, t) => a + (b - a) * t;
+const TAU = Math.PI * 2;
+const GLYPHS = Array.from('01∂∫∇∑∏πλθφψΩμνσ∞≈≡≠≤≥√Δ±×∈∀∃ℏ{}<>=+-*/^|()[]');
+const pick = () => GLYPHS[(Math.random() * GLYPHS.length) | 0];
+// colour ramps for the realistic scenes: stops = [[t, [r,g,b]], ...]
+const ramp = (stops, t) => {
+  t = clamp(t, 0, 1);
+  for (let i = 1; i < stops.length; i++) if (t <= stops[i][0]) {
+    const [t0, c0] = stops[i - 1], [t1, c1] = stops[i], f = (t - t0) / (t1 - t0 || 1);
+    return [c0[0] + (c1[0] - c0[0]) * f, c0[1] + (c1[1] - c0[1]) * f, c0[2] + (c1[2] - c0[2]) * f];
+  }
+  return stops[stops.length - 1][1];
+};
+const mixc = (a, b, f) => [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f];
+const rgba = (c, a = 1) => `rgba(${c[0] | 0},${c[1] | 0},${c[2] | 0},${a})`;
+const toGrey = c => { const l = 0.3 * c[0] + 0.59 * c[1] + 0.11 * c[2]; return [l * 0.97, l, l * 1.04]; };
+const DARK = l => `hsl(${theme.hue},${Math.min(theme.sat, 10)}%,${l}%)`;   // near-black silhouette fill
+// deterministic pseudo-random from an integer (stable shapes every frame)
+const hash = n => { const x = Math.sin(n * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); };
+const MONO = s => `${(s * scale).toFixed(1)}px Consolas, "Cambria Math", "Segoe UI Symbol", "Courier New", monospace`;
+const MATHF = s => `italic ${(s * scale).toFixed(1)}px "Cambria Math", "Times New Roman", serif`;
+
+// Improved Perlin noise (3D)
+const PERM = new Uint8Array(512);
+(() => {
+  const p = []; for (let i = 0; i < 256; i++) p.push(i);
+  for (let i = 255; i > 0; i--) { const j = (Math.random() * (i + 1)) | 0; [p[i], p[j]] = [p[j], p[i]]; }
+  for (let i = 0; i < 512; i++) PERM[i] = p[i & 255];
+})();
+function noise3(x, y, z) {
+  const X = Math.floor(x) & 255, Y = Math.floor(y) & 255, Z = Math.floor(z) & 255;
+  x -= Math.floor(x); y -= Math.floor(y); z -= Math.floor(z);
+  const fd = t => t * t * t * (t * (t * 6 - 15) + 10);
+  const u = fd(x), v = fd(y), w = fd(z);
+  const grad = (h, x, y, z) => {
+    h &= 15; const a = h < 8 ? x : y, b = h < 4 ? y : (h === 12 || h === 14) ? x : z;
+    return ((h & 1) ? -a : a) + ((h & 2) ? -b : b);
+  };
+  const A = PERM[X] + Y, AA = PERM[A] + Z, AB = PERM[A + 1] + Z;
+  const B = PERM[X + 1] + Y, BA = PERM[B] + Z, BB = PERM[B + 1] + Z;
+  return lerp(
+    lerp(lerp(grad(PERM[AA], x, y, z), grad(PERM[BA], x - 1, y, z), u),
+         lerp(grad(PERM[AB], x, y - 1, z), grad(PERM[BB], x - 1, y - 1, z), u), v),
+    lerp(lerp(grad(PERM[AA + 1], x, y, z - 1), grad(PERM[BA + 1], x - 1, y, z - 1), u),
+         lerp(grad(PERM[AB + 1], x, y - 1, z - 1), grad(PERM[BB + 1], x - 1, y - 1, z - 1), u), v), w);
+}
+
+// Background: dark vertical gradient + soft glow at the scene's focus + vignette
+function makeBg() {
+  const c = document.createElement('canvas');
+  c.width = base.width; c.height = base.height;
+  const g = c.getContext('2d');
+  g.setTransform(DPR, 0, 0, DPR, 0, 0);
+  const s = Math.min(theme.sat, 12), h = theme.hue;
+  const lin = g.createLinearGradient(0, 0, 0, H);
+  lin.addColorStop(0, `hsl(${h},${s}%,7%)`);
+  lin.addColorStop(1, `hsl(${h},${s}%,2.5%)`);
+  g.fillStyle = lin; g.fillRect(0, 0, W, H);
+  const fx = SCENE.focus[0] * W, fy = SCENE.focus[1] * H;
+  const rad = g.createRadialGradient(fx, fy, 0, fx, fy, Math.max(W, H) * 0.65);
+  rad.addColorStop(0, `hsla(${h},${s}%,30%,${SCENE.glow ?? 0.28})`);
+  rad.addColorStop(0.35, `hsla(${h},${s}%,16%,0.16)`);
+  rad.addColorStop(1, `hsla(${h},${s}%,0%,0)`);
+  g.fillStyle = rad; g.fillRect(0, 0, W, H);
+  const vig = g.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.35, W / 2, H / 2, Math.max(W, H) * 0.75);
+  vig.addColorStop(0, 'rgba(0,0,0,0)');
+  vig.addColorStop(1, 'rgba(0,0,0,0.55)');
+  g.fillStyle = vig; g.fillRect(0, 0, W, H);
+  if (SCENE.ambient !== false) {
+    // faint graph-paper dots, with a small cross every fourth point
+    const sp = 46 * scale;
+    g.fillStyle = PAL[14]; g.strokeStyle = PAL[14]; g.lineWidth = 0.8 * scale;
+    for (let i = 0, x = sp / 2; x < W; x += sp, i++) {
+      for (let j = 0, y = sp / 2; y < H; y += sp, j++) {
+        if (i % 4 === 0 && j % 4 === 0) {
+          g.globalAlpha = 0.13;
+          g.beginPath(); g.moveTo(x - 3 * scale, y); g.lineTo(x + 3 * scale, y); g.moveTo(x, y - 3 * scale); g.lineTo(x, y + 3 * scale); g.stroke();
+        } else { g.globalAlpha = 0.08; g.fillRect(x - 0.6 * scale, y - 0.6 * scale, 1.2 * scale, 1.2 * scale); }
+      }
+    }
+    // rulers along the top and bottom edges
+    g.globalAlpha = 0.16;
+    g.beginPath();
+    for (let k = 0, x = 0; x < W; x += 10 * scale, k++) {
+      const L = (k % 10 === 0 ? 9 : k % 5 === 0 ? 5 : 2.5) * scale;
+      g.moveTo(x, 0); g.lineTo(x, L); g.moveTo(x, H); g.lineTo(x, H - L);
+    }
+    g.stroke();
+    // corner crop marks
+    g.globalAlpha = 0.25;
+    const m = 18 * scale, q = 14 * scale;
+    g.beginPath();
+    for (const [x, y, sx, sy] of [[m, m, 1, 1], [W - m, m, -1, 1], [m, H - m, 1, -1], [W - m, H - m, -1, -1]]) {
+      g.moveTo(x, y + sy * q); g.lineTo(x, y); g.lineTo(x + sx * q, y);
+    }
+    g.stroke();
+    g.globalAlpha = 1;
+  }
+  return c;
+}
+
+// drifting faint characters, like dust in the light
+const dust = [];
+function drawDust(dt) {
+  if (SCENE.dust === false) return;
+  if (!dust.length) for (let i = 0; i < 30; i++) dust.push({ x: Math.random(), y: Math.random(), vx: rand(-0.004, 0.004), vy: rand(-0.006, -0.0015), g: pick(), a: rand(0.07, 0.18), s: rand(9, 12) });
+  const o = octx;
+  o.save(); o.textAlign = 'center'; o.textBaseline = 'middle'; o.fillStyle = PAL[16];
+  for (const d of dust) {
+    d.x += d.vx * dt; d.y += d.vy * dt;
+    if (d.y < -0.02) { d.y = 1.02; d.x = Math.random(); d.g = pick(); }
+    if (d.x < -0.02) d.x = 1.02; if (d.x > 1.02) d.x = -0.02;
+    o.globalAlpha = d.a; o.font = MONO(d.s);
+    o.fillText(d.g, d.x * W, d.y * H);
+  }
+  o.restore();
+}
+
+// ---------- Overlay: equations typed out + top-right readout ----------
+const EQ_ANCHORS = SCENE.anchors || [[0.30, 0.12], [0.58, 0.08], [0.26, 0.87], [0.60, 0.93], [0.34, 0.32], [0.74, 0.80]];
+const eqSlots = [{ eq: -1, anchor: -1, age: 0, dur: 0 }, { eq: -1, anchor: -1, age: -5, dur: 0 }];
+let eqNext = (Math.random() * SCENE.eqs.length) | 0;
+function eqAssign(s) {
+  s.eq = eqNext; eqNext = (eqNext + 1) % SCENE.eqs.length;
+  const used = eqSlots.map(o => o.anchor);
+  let a; do { a = (Math.random() * EQ_ANCHORS.length) | 0; } while (used.includes(a));
+  s.anchor = a;
+  s.dur = SCENE.eqs[s.eq].e.length / 20 + 8;
+}
+function drawOverlay(t, dt) {
+  if (!SETTINGS.math) return;
+  const o = octx;
+  o.save();
+  o.textBaseline = 'middle';
+  for (const s of eqSlots) {
+    if (s.eq < 0) eqAssign(s);
+    s.age += dt;
+    if (s.age < 0) continue;
+    if (s.age > s.dur) { eqAssign(s); s.age = -2; continue; }
+    const q = SCENE.eqs[s.eq], n = Math.min(q.e.length, Math.floor(s.age * 20));
+    const fade = clamp((s.dur - s.age) / 1.5, 0, 1) * clamp(s.age * 2, 0, 1);
+    const x = EQ_ANCHORS[s.anchor][0] * W, y = EQ_ANCHORS[s.anchor][1] * H;
+    o.textAlign = 'left';
+    o.font = MATHF(15.5);
+    o.globalAlpha = 0.8 * fade; o.fillStyle = PAL[20];
+    const shown = q.e.slice(0, n);
+    o.fillText(shown, x, y);
+    if (n < q.e.length) {
+      const w = o.measureText(shown).width;
+      o.fillRect(x + w + 3 * scale, y - 8 * scale, 1.4 * scale, 16 * scale);
+    } else {
+      o.font = MONO(10.5); o.fillStyle = PAL[13];
+      o.globalAlpha = 0.6 * fade * clamp((s.age - q.e.length / 20) * 1.5, 0, 1);
+      o.fillText('— ' + q.n, x, y + 20 * scale);
+    }
+  }
+  o.font = MONO(10.5); o.textAlign = 'right'; o.textBaseline = 'top';
+  const hx = W - 28 * scale; let hy = 26 * scale;
+  const lines = [[SCENE.title, 0.62, 13], [SCENE.sub, 0.48, 13], ...(SCENE.hud ? SCENE.hud(t).map(l => [l, 0.48, 13]) : []),
+                 [`t = ${t.toFixed(2).padStart(9, '0')} s`, 0.75, 20]];
+  for (const [txt, al, c] of lines) { o.globalAlpha = al; o.fillStyle = PAL[c]; o.fillText(txt, hx, hy); hy += 16 * scale; }
+  o.restore();
+}
+
+// ---------- Boot ----------
+function setup() {
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  W = window.innerWidth; H = window.innerHeight;
+  for (const c of [base, over]) { c.width = Math.round(W * DPR); c.height = Math.round(H * DPR); }
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  octx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  scale = Math.max(0.6, Math.min(W, H) / 1080);
+  bgSprite = makeBg();
+  ctx.drawImage(bgSprite, 0, 0, W, H);
+  SCENE.init();
+}
+
+let last = performance.now(), acc = 0, T0 = performance.now();
+function loop(now) {
+  requestAnimationFrame(loop);
+  acc += now - last; last = now;
+  if (acc < 1000 / SETTINGS.fps - 1) return;
+  const dt = Math.min(acc / 1000, 0.1);
+  acc = 0;
+  const t = (now - T0) / 1000;
+  smx += (mx - smx) * 0.05; smy += (my - smy) * 0.05;
+  const off = SETTINGS.parallax ? 12 * scale : 0;
+  const ox = smx * off, oy = smy * off;
+  if (SCENE.update) SCENE.update(dt, t);
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.globalAlpha = SCENE.trail || 1;
+  ctx.drawImage(bgSprite, 0, 0, W, H);
+  ctx.globalAlpha = 1;
+  SCENE.draw(t, ox, oy);
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.globalAlpha = 1;
+  octx.clearRect(0, 0, W, H);
+  drawDust(dt);
+  if (SCENE.drawOver) { octx.save(); SCENE.drawOver(t, ox, oy); octx.restore(); }
+  drawOverlay(t, dt);
+}
+window.addEventListener('mousemove', e => { mx = (e.clientX / W) * 2 - 1; my = (e.clientY / H) * 2 - 1; });
+let rt;
+window.addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(setup, 200); });
+setup();
+requestAnimationFrame(loop);

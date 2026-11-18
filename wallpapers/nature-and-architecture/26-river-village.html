@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>River Village at Dawn</title>
+<!--
+  River Village at Dawn — live wallpaper for Lively Wallpaper (grey · mathematical series)
+  Add it in Lively: click "+" → choose this file.
+  Change the SETTINGS block below with Notepad, save, then re-add in Lively.
+-->
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; }
+</style>
+</head>
+<body>
+<canvas id="base"></canvas>
+<canvas id="over"></canvas>
+<script>
+// ===================== SETTINGS =====================
+const SETTINGS = {
+  theme: 'grey',    // 'grey' | 'warm' | 'green' | 'ice' | 'amber'
+  math: true,       // equations, labels and readouts (false = clean version)
+  parallax: true,   // gentle shift with the mouse
+  fps: 30,          // frame cap; 30 keeps the GPU/CPU load low
+};
+// ====================================================
+
+// Village — a riverside village in the Bengal delta at sunrise. Thatched do-chala huts and palms line the far bank,
+// country boats drift on the river, egrets cross the sky and rice fields run toward the vanishing point.
+const SCENE = {
+  focus: [0.72, 0.36],
+  glow: 0.3,
+  ambient: false,
+  anchors: [[0.24, 0.08], [0.46, 0.05], [0.22, 0.2], [0.42, 0.16], [0.62, 0.08], [0.24, 0.3]],
+  title: 'RIVER VILLAGE · DELTA AT DAWN',
+  sub: 'one-point perspective · floating boats',
+  eqs: [
+    { e: 'F_b = ρ g V_displaced', n: "Archimedes — a boat floats on the water it pushes aside" },
+    { e: 'Q = A v', n: 'river discharge: cross-section × speed' },
+    { e: "v = (1/n) R^(2/3) S^(1/2)", n: "Manning's equation for open channels" },
+    { e: "x' = f · x / z", n: 'perspective — rows of rice meet at one point' },
+    { e: 'T = 2π √(m / (ρ g A_w))', n: 'heave period of a bobbing boat' },
+    { e: 'Δt_sunrise ≈ 2 min per 0.5° of horizon', n: 'the sun rises its own width in about two minutes' }
+  ],
+  init() {
+    this.bank = H * 0.5; this.shore = H * 0.72;
+    this.huts = [0.32, 0.4, 0.47, 0.58, 0.66, 0.86].map((x, i) => ({ x, w: rand(0.035, 0.05), h: rand(0.035, 0.05), smoke: i === 2 || i === 4 }));
+    this.palms = [0.27, 0.36, 0.44, 0.52, 0.55, 0.62, 0.7, 0.79, 0.83, 0.92, 0.97].map(x => ({ x, h: rand(0.14, 0.24), lean: rand(-0.2, 0.2), ph: rand(0, TAU) }));
+    this.boats = [
+      { x: 0.1, y: 0.58, s: 0.8, v: 0.006, canopy: true, man: false },
+      { x: 0.5, y: 0.64, s: 1.2, v: 0.004, canopy: false, man: true },
+      { x: 0.8, y: 0.55, s: 0.55, v: 0.008, canopy: true, man: true }
+    ];
+    this.birds = [];
+    for (let i = 0; i < 7; i++) this.birds.push({ dx: i * 30 - rand(0, 20), dy: Math.abs(i - 3) * 14 + rand(-4, 4), ph: rand(0, TAU) });
+    this.flock = -0.1;
+    this.tufts = [];
+    for (let i = 0; i < 520; i++) this.tufts.push({ u: Math.random() * 2 - 1, v: Math.random(), ph: rand(0, TAU) });
+  },
+  update(dt) {
+    for (const b of this.boats) { b.x += b.v * dt; if (b.x > 1.15) b.x = -0.15; }
+    this.flock += dt * 0.015; if (this.flock > 1.2) this.flock = -0.2;
+  },
+  hut(x, y, w, h) {
+    ctx.beginPath();
+    ctx.rect(x - w / 2, y - h, w, h);
+    ctx.moveTo(x - w * 0.66, y - h + 2 * scale);
+    ctx.quadraticCurveTo(x, y - h - h * 0.22, x + w * 0.66, y - h + 2 * scale);
+    ctx.lineTo(x + w * 0.42, y - h * 1.9);
+    ctx.quadraticCurveTo(x, y - h * 2.12, x - w * 0.42, y - h * 1.9);
+    ctx.closePath();
+  },
+  palm(x, y, h, lean, t, ph) {
+    const tx = x + lean * h, ty = y - h, sw = Math.sin(t * 0.6 + ph) * 3 * scale;
+    ctx.beginPath(); ctx.moveTo(x, y); ctx.quadraticCurveTo(x + lean * h * 0.2, y - h * 0.6, tx + sw * 0.5, ty);
+    for (let k = 0; k < 8; k++) {
+      const a = -Math.PI / 2 + (k - 3.5) * 0.42, L = h * 0.32;
+      ctx.moveTo(tx + sw * 0.5, ty);
+      ctx.quadraticCurveTo(tx + Math.cos(a) * L * 0.6 + sw, ty + Math.sin(a) * L * 0.6 - L * 0.15, tx + Math.cos(a) * L + sw, ty + Math.sin(a) * L * 0.4 + L * 0.35);
+    }
+  },
+  boat(b, t, ox) {
+    const x = b.x * W + ox * b.s, y = b.y * H + Math.sin(t * 1.4 + b.x * 20) * 1.5 * scale, L = W * 0.05 * b.s, d = L * 0.18;
+    const tilt = Math.sin(t * 1.1 + b.x * 9) * 0.03;
+    ctx.save(); ctx.translate(x, y); ctx.rotate(tilt);
+    ctx.beginPath();
+    ctx.moveTo(-L, -d * 1.4); ctx.quadraticCurveTo(-L * 0.4, d * 1.2, 0, d); ctx.quadraticCurveTo(L * 0.4, d * 1.2, L, -d * 1.4);
+    ctx.quadraticCurveTo(0, -d * 0.1, -L, -d * 1.4); ctx.closePath();
+    ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1; ctx.fillStyle = DARK(3); ctx.fill();
+    ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = 0.6; ctx.strokeStyle = PAL[18]; ctx.lineWidth = 1 * scale; ctx.stroke();
+    if (b.canopy) { ctx.beginPath(); ctx.moveTo(-L * 0.35, -d * 0.5); ctx.quadraticCurveTo(0, -d * 3.6, L * 0.35, -d * 0.5); ctx.globalAlpha = 0.5; ctx.stroke(); }
+    if (b.man) {
+      ctx.globalAlpha = 0.6; ctx.beginPath();
+      const mx = L * 0.6; ctx.moveTo(mx, -d); ctx.lineTo(mx, -d * 4); ctx.arc(mx, -d * 4.5, d * 0.5, 0, TAU);
+      const pa = -1.2 + Math.sin(t * 0.8 + b.x * 5) * 0.15; ctx.moveTo(mx - Math.cos(pa) * d * 6, -d * 3 - Math.sin(pa) * d * 6); ctx.lineTo(mx + Math.cos(pa) * d * 3, -d * 3 + Math.sin(pa) * d * 3.5);
+      ctx.stroke();
+    }
+    ctx.restore();
+    // reflection
+    ctx.globalAlpha = 0.18; ctx.strokeStyle = PAL[16]; ctx.lineWidth = 0.8 * scale;
+    ctx.beginPath(); for (let k = -3; k <= 3; k++) { const yy = y + d * 1.8 + Math.abs(k) * 2 * scale; ctx.moveTo(x - L * 0.8 + Math.sin(t + k) * 3 * scale, yy + k * 3 * scale); ctx.lineTo(x + L * 0.8 + Math.sin(t + k) * 3 * scale, yy + k * 3 * scale); } ctx.stroke();
+  },
+  draw(t, ox, oy) {
+    const sx = this.focus[0] * W + ox * 0.15, sy = this.focus[1] * H + oy * 0.15, sr = H * 0.05;
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.globalAlpha = 0.85; ctx.fillStyle = shade(0.8, 0.35); ctx.beginPath(); ctx.arc(sx, sy, sr, 0, TAU); ctx.fill();
+    ctx.globalAlpha = 0.5; ctx.strokeStyle = PAL[21]; ctx.lineWidth = 1 * scale; ctx.beginPath(); ctx.arc(sx, sy, sr, 0, TAU); ctx.stroke();
+    // mist bands across the sky
+    for (let k = 0; k < 7; k++) {
+      const y = H * (0.3 + k * 0.03), off = Math.sin(t * 0.03 + k) * W * 0.05;
+      ctx.globalAlpha = 0.07; ctx.strokeStyle = PAL[18]; ctx.lineWidth = (2 + k) * scale;
+      ctx.beginPath(); ctx.moveTo(W * (0.15 + 0.05 * k) + off, y); ctx.lineTo(W * (0.75 + 0.04 * k) + off, y); ctx.stroke();
+    }
+    // egrets
+    ctx.strokeStyle = PAL[20]; ctx.lineWidth = 1.1 * scale;
+    for (const b of this.birds) {
+      const x = this.flock * W + b.dx * scale * 2, y = H * 0.2 + b.dy * scale * 1.5, f = Math.sin(t * 2.4 + b.ph) * 4 * scale, w = 9 * scale;
+      ctx.globalAlpha = 0.6; ctx.beginPath(); ctx.moveTo(x - w, y - f); ctx.quadraticCurveTo(x - w * 0.4, y - 3 * scale, x, y); ctx.quadraticCurveTo(x + w * 0.4, y - 3 * scale, x + w, y - f); ctx.stroke();
+    }
+    // far bank: tree clumps, palms and huts (silhouettes with edge light)
+    const bank = this.bank + oy * 0.3;
+    ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1; ctx.fillStyle = DARK(5);
+    ctx.beginPath(); ctx.moveTo(0, bank);
+    for (let x = 0; x <= W; x += 6 * scale) ctx.lineTo(x, bank - H * 0.035 - Math.abs(noise3(x * 0.006, 1, 3)) * H * 0.05);
+    ctx.lineTo(W, bank); ctx.closePath(); ctx.fill();
+    ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = 0.25; ctx.strokeStyle = PAL[15]; ctx.lineWidth = 0.8 * scale; ctx.stroke();
+    for (const p of this.palms) {
+      this.palm(p.x * W + ox * 0.3, bank - H * 0.02, p.h * H, p.lean, t, p.ph);
+      ctx.globalAlpha = 0.5; ctx.strokeStyle = PAL[17]; ctx.lineWidth = 1.2 * scale; ctx.stroke();
+    }
+    for (const hu of this.huts) {
+      const x = hu.x * W + ox * 0.3, y = bank, w = hu.w * W, h = hu.h * H;
+      this.hut(x, y, w, h);
+      ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1; ctx.fillStyle = DARK(4); ctx.fill();
+      ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = 0.55; ctx.strokeStyle = PAL[18]; ctx.lineWidth = 1 * scale; ctx.stroke();
+      // thatch lines
+      ctx.globalAlpha = 0.2; ctx.beginPath();
+      for (let k = 1; k < 7; k++) { const u = k / 7 - 0.5; ctx.moveTo(x + u * w * 1.25, y - h + 1); ctx.lineTo(x + u * w * 0.82, y - h * 1.92); }
+      ctx.stroke();
+      ctx.globalAlpha = 0.5; ctx.strokeRect(x - w * 0.1, y - h * 0.62, w * 0.2, h * 0.62);
+      if (hu.smoke) for (let k = 0; k < 5; k++) { const ph = (t * 0.12 + k / 5) % 1; ctx.globalAlpha = 0.2 * (1 - ph); ctx.beginPath(); ctx.arc(x + w * 0.2 + ph * 40 * scale, y - h * 2 - ph * 110 * scale, (3 + ph * 16) * scale, 0, TAU); ctx.stroke(); }
+    }
+    // river: ripples, reflections of the bank, the sun's glitter path
+    ctx.globalAlpha = 0.5; ctx.strokeStyle = PAL[16]; ctx.beginPath(); ctx.moveTo(0, bank); ctx.lineTo(W, bank); ctx.stroke();
+    for (let k = 0; k < 30; k++) {
+      const y = bank + Math.pow(k / 30, 1.4) * (this.shore - bank);
+      ctx.globalAlpha = 0.05 + 0.08 * k / 30; ctx.strokeStyle = PAL[15]; ctx.lineWidth = 0.7 * scale;
+      ctx.beginPath(); for (let x = 0; x <= W; x += 14 * scale) { const yy = y + Math.sin(x * 0.012 / scale + t * 0.6 + k * 0.7) * (0.6 + k * 0.05) * scale; x ? ctx.lineTo(x, yy) : ctx.moveTo(x, yy); } ctx.stroke();
+      const gw = W * (0.01 + 0.05 * k / 30);
+      for (let g = 0; g < 3; g++) {
+        const gx = sx + (hash(k * 7 + g + Math.floor(t * 1.5)) - 0.5) * gw * 2;
+        ctx.globalAlpha = 0.35 * (0.5 + 0.5 * Math.sin(t * 2 + k + g)); ctx.strokeStyle = PAL[22]; ctx.lineWidth = 1.2 * scale;
+        ctx.beginPath(); ctx.moveTo(gx - 6 * scale, y); ctx.lineTo(gx + 6 * scale, y); ctx.stroke();
+      }
+    }
+    for (const p of this.palms) {
+      const x = p.x * W + ox * 0.3;
+      ctx.save(); ctx.translate(0, 2 * (bank + 2 * scale)); ctx.scale(1, -1);
+      this.palm(x, bank - H * 0.02, p.h * H * 0.8, p.lean, t, p.ph);
+      ctx.restore();
+      ctx.globalAlpha = 0.1; ctx.strokeStyle = PAL[16]; ctx.lineWidth = 1 * scale; ctx.stroke();
+    }
+    for (const b of this.boats) this.boat(b, t, ox);
+    // near bank and rice fields in one-point perspective
+    const shore = this.shore + oy * 0.6, vx = W * 0.6, vy = this.bank;
+    ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1; ctx.fillStyle = DARK(7);
+    ctx.beginPath(); ctx.moveTo(0, shore); for (let x = 0; x <= W; x += 10 * scale) ctx.lineTo(x, shore + noise3(x * 0.005, 9, 1) * 6 * scale); ctx.lineTo(W, H); ctx.lineTo(0, H); ctx.closePath(); ctx.fill();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.globalAlpha = 0.45; ctx.strokeStyle = PAL[17]; ctx.lineWidth = 1 * scale; ctx.stroke();
+    ctx.lineWidth = 0.7 * scale; ctx.strokeStyle = PAL[14];
+    for (let k = -14; k <= 14; k++) {
+      const xb = vx + k * W * 0.09, f = (shore - vy) / (H - vy);
+      ctx.globalAlpha = 0.14; ctx.beginPath(); ctx.moveTo(vx + (xb - vx) * f, shore); ctx.lineTo(xb, H); ctx.stroke();
+    }
+    for (let k = 1; k <= 8; k++) { const y = shore + (H - shore) * Math.pow(k / 8, 1.6); ctx.globalAlpha = 0.1; ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
+    ctx.strokeStyle = PAL[17]; ctx.lineWidth = 0.8 * scale; ctx.beginPath();
+    for (const tf of this.tufts) {
+      const y = shore + (H - shore) * Math.pow(tf.v, 1.5), f = (y - vy) / (H - vy);
+      const x = vx + tf.u * W * 1.4 * f, h = (4 + 14 * f) * scale, sw = Math.sin(t * 1.1 + tf.ph + x * 0.004) * 2.5 * scale * f;
+      if (x < -20 || x > W + 20) continue;
+      ctx.moveTo(x, y); ctx.quadraticCurveTo(x + sw * 0.3, y - h * 0.6, x + sw, y - h);
+      ctx.moveTo(x, y); ctx.quadraticCurveTo(x - h * 0.2, y - h * 0.5, x - h * 0.35 + sw, y - h * 0.8);
+    }
+    ctx.globalAlpha = 0.3; ctx.stroke();
+    this.vp = [vx, vy];
+  },
+  drawOver(t) {
+    if (!SETTINGS.math || !this.vp) return;
+    const o = octx, [vx, vy] = this.vp;
+    o.lineWidth = 0.8 * scale; o.setLineDash([2 * scale, 6 * scale]);
+    o.globalAlpha = 0.3; o.strokeStyle = PAL[18];
+    for (const k of [-5, -2, 2, 5]) { o.beginPath(); o.moveTo(vx, vy); o.lineTo(vx + k * W * 0.09, H); o.stroke(); }
+    o.setLineDash([]);
+    o.globalAlpha = 0.7; o.beginPath(); o.arc(vx, vy, 4 * scale, 0, TAU); o.stroke();
+    o.font = MONO(10.5); o.textBaseline = 'middle'; o.textAlign = 'left'; o.fillStyle = PAL[18];
+    o.fillText('vanishing point', vx + 10 * scale, vy - 10 * scale);
+    const b = this.boats[1], x = b.x * W, y = b.y * H;
+    if (x > W * 0.2 && x < W * 0.85) {
+      o.globalAlpha = 0.45; o.beginPath(); o.moveTo(x, y + 10 * scale); o.lineTo(x + 40 * scale, y + 46 * scale); o.lineTo(x + 56 * scale, y + 46 * scale); o.stroke();
+      o.globalAlpha = 0.65; o.fillText('displaced water ≈ boat + load ≈ 0.6 t', x + 62 * scale, y + 46 * scale);
+    }
+    o.globalAlpha = 0.5;
+    o.fillText('river flow  →  v ≈ 0.8 m/s', W * 0.24, H * 0.62);
+  },
+  hud() { return ['6 huts · 3 country boats · 1 flock of egrets']; }
+};
+
+
+// ===================== ENGINE (shared) =====================
+const THEMES = {
+  grey:  { hue: 220, sat: 7 },
+  warm:  { hue: 30, sat: 45 },
+  green: { hue: 140, sat: 85 },
+  ice:   { hue: 190, sat: 90 },
+  amber: { hue: 36,  sat: 95 }
+};
+const theme = THEMES[SETTINGS.theme] || THEMES.grey;
+
+const LEVELS = 24, PAL = [], RGB = [];
+function hsl2rgb(h, s, l) {
+  s /= 100; l /= 100;
+  const k = n => (n + h / 30) % 12, a = s * Math.min(l, 1 - l);
+  const f = n => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+  return [Math.round(f(0) * 255), Math.round(f(8) * 255), Math.round(f(4) * 255)];
+}
+for (let i = 0; i < LEVELS; i++) {
+  const t = i / (LEVELS - 1);
+  const s = Math.round(theme.sat * (1 - t * 0.78)), l = Math.round(18 + t * 72);
+  PAL.push(`hsl(${theme.hue},${s}%,${l}%)`);
+  RGB.push(hsl2rgb(theme.hue, s, l));
+}
+const shade = (t, a = 1) => {
+  const i = Math.max(0, Math.min(LEVELS - 1, Math.round(t * (LEVELS - 1))));
+  const c = RGB[i];
+  return `rgba(${c[0]},${c[1]},${c[2]},${a})`;
+};
+
+const base = document.getElementById('base'), over = document.getElementById('over');
+const ctx = base.getContext('2d'), octx = over.getContext('2d');
+let W, H, DPR, scale, bgSprite;
+let mx = 0, my = 0, smx = 0, smy = 0;
+
+const rand = (a, b) => a + Math.random() * (b - a);
+const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+const lerp = (a, b, t) => a + (b - a) * t;
+const TAU = Math.PI * 2;
+const GLYPHS = Array.from('01∂∫∇∑∏πλθφψΩμνσ∞≈≡≠≤≥√Δ±×∈∀∃ℏ{}<>=+-*/^|()[]');
+const pick = () => GLYPHS[(Math.random() * GLYPHS.length) | 0];
+// colour ramps for the realistic scenes: stops = [[t, [r,g,b]], ...]
+const ramp = (stops, t) => {
+  t = clamp(t, 0, 1);
+  for (let i = 1; i < stops.length; i++) if (t <= stops[i][0]) {
+    const [t0, c0] = stops[i - 1], [t1, c1] = stops[i], f = (t - t0) / (t1 - t0 || 1);
+    return [c0[0] + (c1[0] - c0[0]) * f, c0[1] + (c1[1] - c0[1]) * f, c0[2] + (c1[2] - c0[2]) * f];
+  }
+  return stops[stops.length - 1][1];
+};
+const mixc = (a, b, f) => [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f];
+const rgba = (c, a = 1) => `rgba(${c[0] | 0},${c[1] | 0},${c[2] | 0},${a})`;
+const toGrey = c => { const l = 0.3 * c[0] + 0.59 * c[1] + 0.11 * c[2]; return [l * 0.97, l, l * 1.04]; };
+const DARK = l => `hsl(${theme.hue},${Math.min(theme.sat, 10)}%,${l}%)`;   // near-black silhouette fill
+// deterministic pseudo-random from an integer (stable shapes every frame)
+const hash = n => { const x = Math.sin(n * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); };
+const MONO = s => `${(s * scale).toFixed(1)}px Consolas, "Cambria Math", "Segoe UI Symbol", "Courier New", monospace`;
+const MATHF = s => `italic ${(s * scale).toFixed(1)}px "Cambria Math", "Times New Roman", serif`;
+
+// Improved Perlin noise (3D)
+const PERM = new Uint8Array(512);
+(() => {
+  const p = []; for (let i = 0; i < 256; i++) p.push(i);
+  for (let i = 255; i > 0; i--) { const j = (Math.random() * (i + 1)) | 0; [p[i], p[j]] = [p[j], p[i]]; }
+  for (let i = 0; i < 512; i++) PERM[i] = p[i & 255];
+})();
+function noise3(x, y, z) {
+  const X = Math.floor(x) & 255, Y = Math.floor(y) & 255, Z = Math.floor(z) & 255;
+  x -= Math.floor(x); y -= Math.floor(y); z -= Math.floor(z);
+  const fd = t => t * t * t * (t * (t * 6 - 15) + 10);
+  const u = fd(x), v = fd(y), w = fd(z);
+  const grad = (h, x, y, z) => {
+    h &= 15; const a = h < 8 ? x : y, b = h < 4 ? y : (h === 12 || h === 14) ? x : z;
+    return ((h & 1) ? -a : a) + ((h & 2) ? -b : b);
+  };
+  const A = PERM[X] + Y, AA = PERM[A] + Z, AB = PERM[A + 1] + Z;
+  const B = PERM[X + 1] + Y, BA = PERM[B] + Z, BB = PERM[B + 1] + Z;
+  return lerp(
+    lerp(lerp(grad(PERM[AA], x, y, z), grad(PERM[BA], x - 1, y, z), u),
+         lerp(grad(PERM[AB], x, y - 1, z), grad(PERM[BB], x - 1, y - 1, z), u), v),
+    lerp(lerp(grad(PERM[AA + 1], x, y, z - 1), grad(PERM[BA + 1], x - 1, y, z - 1), u),
+         lerp(grad(PERM[AB + 1], x, y - 1, z - 1), grad(PERM[BB + 1], x - 1, y - 1, z - 1), u), v), w);
+}
+
+// Background: dark vertical gradient + soft glow at the scene's focus + vignette
+function makeBg() {
+  const c = document.createElement('canvas');
+  c.width = base.width; c.height = base.height;
+  const g = c.getContext('2d');
+  g.setTransform(DPR, 0, 0, DPR, 0, 0);
+  const s = Math.min(theme.sat, 12), h = theme.hue;
+  const lin = g.createLinearGradient(0, 0, 0, H);
+  lin.addColorStop(0, `hsl(${h},${s}%,7%)`);
+  lin.addColorStop(1, `hsl(${h},${s}%,2.5%)`);
+  g.fillStyle = lin; g.fillRect(0, 0, W, H);
+  const fx = SCENE.focus[0] * W, fy = SCENE.focus[1] * H;
+  const rad = g.createRadialGradient(fx, fy, 0, fx, fy, Math.max(W, H) * 0.65);
+  rad.addColorStop(0, `hsla(${h},${s}%,30%,${SCENE.glow ?? 0.28})`);
+  rad.addColorStop(0.35, `hsla(${h},${s}%,16%,0.16)`);
+  rad.addColorStop(1, `hsla(${h},${s}%,0%,0)`);
+  g.fillStyle = rad; g.fillRect(0, 0, W, H);
+  const vig = g.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.35, W / 2, H / 2, Math.max(W, H) * 0.75);
+  vig.addColorStop(0, 'rgba(0,0,0,0)');
+  vig.addColorStop(1, 'rgba(0,0,0,0.55)');
+  g.fillStyle = vig; g.fillRect(0, 0, W, H);
+  if (SCENE.ambient !== false) {
+    // faint graph-paper dots, with a small cross every fourth point
+    const sp = 46 * scale;
+    g.fillStyle = PAL[14]; g.strokeStyle = PAL[14]; g.lineWidth = 0.8 * scale;
+    for (let i = 0, x = sp / 2; x < W; x += sp, i++) {
+      for (let j = 0, y = sp / 2; y < H; y += sp, j++) {
+        if (i % 4 === 0 && j % 4 === 0) {
+          g.globalAlpha = 0.13;
+          g.beginPath(); g.moveTo(x - 3 * scale, y); g.lineTo(x + 3 * scale, y); g.moveTo(x, y - 3 * scale); g.lineTo(x, y + 3 * scale); g.stroke();
+        } else { g.globalAlpha = 0.08; g.fillRect(x - 0.6 * scale, y - 0.6 * scale, 1.2 * scale, 1.2 * scale); }
+      }
+    }
+    // rulers along the top and bottom edges
+    g.globalAlpha = 0.16;
+    g.beginPath();
+    for (let k = 0, x = 0; x < W; x += 10 * scale, k++) {
+      const L = (k % 10 === 0 ? 9 : k % 5 === 0 ? 5 : 2.5) * scale;
+      g.moveTo(x, 0); g.lineTo(x, L); g.moveTo(x, H); g.lineTo(x, H - L);
+    }
+    g.stroke();
+    // corner crop marks
+    g.globalAlpha = 0.25;
+    const m = 18 * scale, q = 14 * scale;
+    g.beginPath();
+    for (const [x, y, sx, sy] of [[m, m, 1, 1], [W - m, m, -1, 1], [m, H - m, 1, -1], [W - m, H - m, -1, -1]]) {
+      g.moveTo(x, y + sy * q); g.lineTo(x, y); g.lineTo(x + sx * q, y);
+    }
+    g.stroke();
+    g.globalAlpha = 1;
+  }
+  return c;
+}
+
+// drifting faint characters, like dust in the light
+const dust = [];
+function drawDust(dt) {
+  if (SCENE.dust === false) return;
+  if (!dust.length) for (let i = 0; i < 30; i++) dust.push({ x: Math.random(), y: Math.random(), vx: rand(-0.004, 0.004), vy: rand(-0.006, -0.0015), g: pick(), a: rand(0.07, 0.18), s: rand(9, 12) });
+  const o = octx;
+  o.save(); o.textAlign = 'center'; o.textBaseline = 'middle'; o.fillStyle = PAL[16];
+  for (const d of dust) {
+    d.x += d.vx * dt; d.y += d.vy * dt;
+    if (d.y < -0.02) { d.y = 1.02; d.x = Math.random(); d.g = pick(); }
+    if (d.x < -0.02) d.x = 1.02; if (d.x > 1.02) d.x = -0.02;
+    o.globalAlpha = d.a; o.font = MONO(d.s);
+    o.fillText(d.g, d.x * W, d.y * H);
+  }
+  o.restore();
+}
+
+// ---------- Overlay: equations typed out + top-right readout ----------
+const EQ_ANCHORS = SCENE.anchors || [[0.30, 0.12], [0.58, 0.08], [0.26, 0.87], [0.60, 0.93], [0.34, 0.32], [0.74, 0.80]];
+const eqSlots = [{ eq: -1, anchor: -1, age: 0, dur: 0 }, { eq: -1, anchor: -1, age: -5, dur: 0 }];
+let eqNext = (Math.random() * SCENE.eqs.length) | 0;
+function eqAssign(s) {
+  s.eq = eqNext; eqNext = (eqNext + 1) % SCENE.eqs.length;
+  const used = eqSlots.map(o => o.anchor);
+  let a; do { a = (Math.random() * EQ_ANCHORS.length) | 0; } while (used.includes(a));
+  s.anchor = a;
+  s.dur = SCENE.eqs[s.eq].e.length / 20 + 8;
+}
+function drawOverlay(t, dt) {
+  if (!SETTINGS.math) return;
+  const o = octx;
+  o.save();
+  o.textBaseline = 'middle';
+  for (const s of eqSlots) {
+    if (s.eq < 0) eqAssign(s);
+    s.age += dt;
+    if (s.age < 0) continue;
+    if (s.age > s.dur) { eqAssign(s); s.age = -2; continue; }
+    const q = SCENE.eqs[s.eq], n = Math.min(q.e.length, Math.floor(s.age * 20));
+    const fade = clamp((s.dur - s.age) / 1.5, 0, 1) * clamp(s.age * 2, 0, 1);
+    const x = EQ_ANCHORS[s.anchor][0] * W, y = EQ_ANCHORS[s.anchor][1] * H;
+    o.textAlign = 'left';
+    o.font = MATHF(15.5);
+    o.globalAlpha = 0.8 * fade; o.fillStyle = PAL[20];
+    const shown = q.e.slice(0, n);
+    o.fillText(shown, x, y);
+    if (n < q.e.length) {
+      const w = o.measureText(shown).width;
+      o.fillRect(x + w + 3 * scale, y - 8 * scale, 1.4 * scale, 16 * scale);
+    } else {
+      o.font = MONO(10.5); o.fillStyle = PAL[13];
+      o.globalAlpha = 0.6 * fade * clamp((s.age - q.e.length / 20) * 1.5, 0, 1);
+      o.fillText('— ' + q.n, x, y + 20 * scale);
+    }
+  }
+  o.font = MONO(10.5); o.textAlign = 'right'; o.textBaseline = 'top';
+  const hx = W - 28 * scale; let hy = 26 * scale;
+  const lines = [[SCENE.title, 0.62, 13], [SCENE.sub, 0.48, 13], ...(SCENE.hud ? SCENE.hud(t).map(l => [l, 0.48, 13]) : []),
+                 [`t = ${t.toFixed(2).padStart(9, '0')} s`, 0.75, 20]];
+  for (const [txt, al, c] of lines) { o.globalAlpha = al; o.fillStyle = PAL[c]; o.fillText(txt, hx, hy); hy += 16 * scale; }
+  o.restore();
+}
+
+// ---------- Boot ----------
+function setup() {
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  W = window.innerWidth; H = window.innerHeight;
+  for (const c of [base, over]) { c.width = Math.round(W * DPR); c.height = Math.round(H * DPR); }
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  octx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  scale = Math.max(0.6, Math.min(W, H) / 1080);
+  bgSprite = makeBg();
+  ctx.drawImage(bgSprite, 0, 0, W, H);
+  SCENE.init();
+}
+
+let last = performance.now(), acc = 0, T0 = performance.now();
+function loop(now) {
+  requestAnimationFrame(loop);
+  acc += now - last; last = now;
+  if (acc < 1000 / SETTINGS.fps - 1) return;
+  const dt = Math.min(acc / 1000, 0.1);
+  acc = 0;
+  const t = (now - T0) / 1000;
+  smx += (mx - smx) * 0.05; smy += (my - smy) * 0.05;
+  const off = SETTINGS.parallax ? 12 * scale : 0;
+  const ox = smx * off, oy = smy * off;
+  if (SCENE.update) SCENE.update(dt, t);
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.globalAlpha = SCENE.trail || 1;
+  ctx.drawImage(bgSprite, 0, 0, W, H);
+  ctx.globalAlpha = 1;
+  SCENE.draw(t, ox, oy);
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.globalAlpha = 1;
+  octx.clearRect(0, 0, W, H);
+  drawDust(dt);
+  if (SCENE.drawOver) { octx.save(); SCENE.drawOver(t, ox, oy); octx.restore(); }
+  drawOverlay(t, dt);
+}
+window.addEventListener('mousemove', e => { mx = (e.clientX / W) * 2 - 1; my = (e.clientY / H) * 2 - 1; });
+let rt;
+window.addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(setup, 200); });
+setup();
+requestAnimationFrame(loop);
+
+</script>
+</body>
+</html>

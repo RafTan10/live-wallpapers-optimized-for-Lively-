@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DNA · Double Helix</title>
+<!--
+  DNA · Double Helix — live wallpaper for Lively Wallpaper (grey · mathematical series)
+  Add it in Lively: click "+" → choose this file.
+  Change the SETTINGS block below with Notepad, save, then re-add in Lively.
+-->
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; }
+</style>
+</head>
+<body>
+<canvas id="base"></canvas>
+<canvas id="over"></canvas>
+<script>
+// ===================== SETTINGS =====================
+const SETTINGS = {
+  theme: 'grey',    // 'grey' | 'warm' | 'green' | 'ice' | 'amber'
+  math: true,       // equations, labels and readouts (false = clean version)
+  parallax: true,   // gentle shift with the mouse
+  fps: 30,          // frame cap; 30 keeps the GPU/CPU load low
+};
+// ====================================================
+
+// Biology — a B-DNA double helix turning in 3D, with complementary base pairs (A–T, G–C),
+// a second helix further back, drifting base-ring molecules, and a live codon → amino-acid ticker.
+const CODE = 'FFLLSSSSYY**CC*WLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG';   // standard genetic code, order TCAG
+const AA3 = { F: 'Phe', L: 'Leu', S: 'Ser', Y: 'Tyr', '*': 'Stop', C: 'Cys', W: 'Trp', P: 'Pro', H: 'His', Q: 'Gln', R: 'Arg',
+              I: 'Ile', M: 'Met', T: 'Thr', N: 'Asn', K: 'Lys', V: 'Val', A: 'Ala', D: 'Asp', E: 'Glu', G: 'Gly' };
+const SCENE = {
+  focus: [0.62, 0.5],
+  title: 'B-DNA DOUBLE HELIX',
+  sub: '10.5 bp per turn · pitch 3.4 nm · Ø 2.0 nm',
+  anchors: [[0.30, 0.12], [0.56, 0.08], [0.26, 0.30], [0.70, 0.74], [0.36, 0.56], [0.76, 0.22]],
+  eqs: [
+    { e: 'h(s) = (r cos 2πs/p,  r sin 2πs/p,  s)', n: 'parametric helix, pitch p' },
+    { e: 'A ═ T    G ≡ C', n: '2 and 3 hydrogen bonds per pair' },
+    { e: '%A = %T,   %G = %C', n: "Chargaff's rules" },
+    { e: 'p / bp = 3.4 nm / 10.5 ≈ 0.34 nm', n: 'rise per base pair' },
+    { e: '4³ = 64 codons → 20 amino acids', n: 'the genetic code is redundant' },
+    { e: '4ⁿ possible sequences', n: 'information in n base pairs' }
+  ],
+  init() {
+    this.P = H * 0.46;
+    this.r = this.P * (1.0 / 3.4);
+    this.ang = -0.42;
+    this.len = Math.hypot(W, H) * 0.9;
+    this.minor = 2.4;
+    this.seq = [];
+    for (let i = 0; i < 4096; i++) this.seq.push('ATGC'[(Math.random() * 4) | 0]);
+    this.seq[0] = 'A'; this.seq[1] = 'T'; this.seq[2] = 'G';
+    this.mols = [];
+    for (let i = 0; i < 11; i++) this.mols.push({ x: Math.random(), y: Math.random(), vx: rand(-0.004, 0.004), vy: rand(-0.004, 0.004), r: rand(14, 28), a: rand(0, TAU), w: rand(-0.15, 0.15), two: Math.random() < 0.5, al: rand(0.22, 0.42) });
+  },
+  update(dt) {
+    for (const m of this.mols) {
+      m.x += m.vx * dt; m.y += m.vy * dt; m.a += m.w * dt;
+      if (m.x < -0.05) m.x = 1.05; if (m.x > 1.05) m.x = -0.05; if (m.y < -0.05) m.y = 1.05; if (m.y > 1.05) m.y = -0.05;
+    }
+  },
+  helix(cx, cy, P, r, ang, len, spin, mul, letters, t) {
+    const ux = Math.cos(ang), uy = Math.sin(ang), nx = -uy, ny = ux;
+    const pt = (s, th) => {
+      const a = Math.cos(th) * r, z = Math.sin(th);
+      const f = 1 + z * 0.08;
+      return [cx + ux * s + nx * a * f, cy + uy * s + ny * a * f, z];
+    };
+    const L = len / 2;
+    for (const off of [0, this.minor]) {
+      let prev = null;
+      for (let s = -L; s <= L; s += 5 * scale) {
+        const p = pt(s, TAU * s / P + spin + off);
+        if (prev) {
+          const front = 0.5 - 0.5 * p[2], edge = clamp(1 - Math.abs(s) / L, 0, 1);
+          ctx.globalAlpha = (0.28 + 0.5 * front) * Math.min(1, edge * 4) * mul;
+          ctx.strokeStyle = PAL[Math.round(10 + 11 * front)];
+          ctx.lineWidth = (1 + 1.6 * front) * scale * (0.5 + 0.5 * mul);
+          ctx.beginPath(); ctx.moveTo(prev[0], prev[1]); ctx.lineTo(p[0], p[1]); ctx.stroke();
+        }
+        prev = p;
+      }
+    }
+    const rise = P / 10.5, k0 = Math.floor(-L / rise), k1 = Math.floor(L / rise);
+    const shift = Math.floor(t * 0.9);
+    const comp = { A: 'T', T: 'A', G: 'C', C: 'G' };
+    let mark = null;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    for (let k = k0; k <= k1; k++) {
+      const s = k * rise, th = TAU * s / P + spin;
+      const a = pt(s, th), b = pt(s, th + this.minor);
+      const edge = clamp(1 - Math.abs(s) / L, 0, 1);
+      const front = 0.5 - 0.25 * (a[2] + b[2]);
+      ctx.globalAlpha = (0.08 + 0.4 * front) * Math.min(1, edge * 4) * mul;
+      ctx.strokeStyle = PAL[13]; ctx.lineWidth = 0.9 * scale;
+      ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
+      if (!letters) continue;
+      const base = this.seq[((k + shift) % 4096 + 4096) % 4096], pair = comp[base];
+      for (const [p, ch] of [[a, base], [b, pair]]) {
+        const fr = 0.5 - 0.5 * p[2];
+        ctx.globalAlpha = (0.15 + 0.8 * fr) * Math.min(1, edge * 4) * mul;
+        ctx.fillStyle = PAL[Math.round(12 + 11 * fr)];
+        ctx.font = MONO(8 + 6 * fr);
+        ctx.fillText(ch, p[0], p[1]);
+      }
+      if (k === 0) mark = [a, b, base, pair];
+    }
+    return mark;
+  },
+  draw(t, ox, oy) {
+    const cx = this.focus[0] * W + ox, cy = this.focus[1] * H + oy;
+    ctx.globalCompositeOperation = 'lighter';
+    // drifting base-ring molecules (hexagon, or hexagon + pentagon like a purine)
+    ctx.lineWidth = 0.9 * scale;
+    for (const m of this.mols) {
+      const x = m.x * W, y = m.y * H, r = m.r * scale;
+      ctx.globalAlpha = m.al; ctx.strokeStyle = PAL[15];
+      ctx.beginPath();
+      for (let k = 0; k <= 6; k++) { const a = m.a + k * TAU / 6; k ? ctx.lineTo(x + Math.cos(a) * r, y + Math.sin(a) * r) : ctx.moveTo(x + Math.cos(a) * r, y + Math.sin(a) * r); }
+      if (m.two) {
+        const a1 = m.a, a2 = m.a + TAU / 6;
+        const p1 = [x + Math.cos(a1) * r, y + Math.sin(a1) * r], p2 = [x + Math.cos(a2) * r, y + Math.sin(a2) * r];
+        const mid = (a1 + a2) / 2, d = r * 1.95;
+        const q1 = [x + Math.cos(mid - 0.42) * d, y + Math.sin(mid - 0.42) * d], q2 = [x + Math.cos(mid) * d * 1.12, y + Math.sin(mid) * d * 1.12], q3 = [x + Math.cos(mid + 0.42) * d, y + Math.sin(mid + 0.42) * d];
+        ctx.moveTo(p1[0], p1[1]); ctx.lineTo(q1[0], q1[1]); ctx.lineTo(q2[0], q2[1]); ctx.lineTo(q3[0], q3[1]); ctx.lineTo(p2[0], p2[1]);
+      }
+      ctx.stroke();
+      ctx.globalAlpha = m.al * 0.8; ctx.fillStyle = PAL[17]; ctx.font = MONO(8);
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(m.two ? 'N' : 'C', x + Math.cos(m.a + 2) * r * 0.55, y + Math.sin(m.a + 2) * r * 0.55);
+    }
+    // a second, distant helix behind
+    this.helix(W * 0.4 + ox * 0.4, H * 0.3 + oy * 0.4, this.P * 0.5, this.r * 0.5, -0.16, this.len * 0.55, -t * 0.3, 0.45, false, t);
+    // main helix
+    this.marks = this.helix(cx, cy, this.P, this.r, this.ang, this.len, t * 0.45, 1, true, t) || [];
+    // codon ticker along the bottom
+    const shift = Math.floor(t * 0.9), y0 = H * 0.9, x0 = W * 0.24;
+    const frac = (t * 0.9) % 1;
+    ctx.font = MONO(12); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    const cw = 11 * scale;
+    for (let i = 0; i < 66; i++) {
+      const b = this.seq[(i + shift) % 4096], x = x0 + (i - frac) * cw;
+      const edge = clamp(Math.min(i - frac, 66 - i) / 6, 0, 1);
+      ctx.globalAlpha = 0.55 * edge; ctx.fillStyle = PAL[18];
+      ctx.fillText(b, x, y0);
+      if ((i + shift) % 3 === 0 && i + 2 < 66) {
+        const idx = 'TCAG'.indexOf(b) * 16 + 'TCAG'.indexOf(this.seq[(i + 1 + shift) % 4096]) * 4 + 'TCAG'.indexOf(this.seq[(i + 2 + shift) % 4096]);
+        const aa = AA3[CODE[idx]];
+        ctx.globalAlpha = 0.35 * edge; ctx.strokeStyle = PAL[14]; ctx.lineWidth = 0.8 * scale;
+        ctx.beginPath(); ctx.moveTo(x - cw * 0.45, y0 + 10 * scale); ctx.lineTo(x + cw * 2.45, y0 + 10 * scale); ctx.stroke();
+        ctx.globalAlpha = 0.5 * edge; ctx.fillStyle = aa === 'Stop' || aa === 'Met' ? PAL[22] : PAL[15];
+        ctx.font = MONO(10);
+        ctx.fillText(aa, x + cw, y0 + 22 * scale);
+        ctx.font = MONO(12);
+      }
+    }
+    ctx.globalAlpha = 0.4; ctx.fillStyle = PAL[15]; ctx.font = MONO(10); ctx.textAlign = 'right';
+    ctx.fillText("5′", x0 - 10 * scale, y0); ctx.textAlign = 'left';
+    ctx.fillText("3′", x0 + 66 * cw, y0);
+  },
+  drawOver(t, ox, oy) {
+    if (!SETTINGS.math) return;
+    const o = octx, cx = this.focus[0] * W + ox, cy = this.focus[1] * H + oy;
+    const ux = Math.cos(this.ang), uy = Math.sin(this.ang), nx = -uy, ny = ux;
+    o.strokeStyle = PAL[14]; o.fillStyle = PAL[17]; o.lineWidth = 0.8 * scale; o.font = MONO(10.5);
+    o.textBaseline = 'middle';
+    const d = this.r * 1.9, s0 = this.P * 0.2, s1 = s0 + this.P;
+    const A = [cx + ux * s0 + nx * d, cy + uy * s0 + ny * d], B = [cx + ux * s1 + nx * d, cy + uy * s1 + ny * d];
+    o.globalAlpha = 0.45;
+    o.beginPath(); o.moveTo(A[0], A[1]); o.lineTo(B[0], B[1]);
+    for (const P of [A, B]) { o.moveTo(P[0] - nx * 7 * scale, P[1] - ny * 7 * scale); o.lineTo(P[0] + nx * 7 * scale, P[1] + ny * 7 * scale); }
+    o.stroke();
+    o.globalAlpha = 0.7; o.textAlign = 'center';
+    o.fillText('p = 3.4 nm  (one full turn)', (A[0] + B[0]) / 2 + nx * 16 * scale, (A[1] + B[1]) / 2 + ny * 16 * scale);
+    const s2 = -this.P * 0.9;
+    const C = [cx + ux * s2 - nx * this.r, cy + uy * s2 - ny * this.r], D = [cx + ux * s2 + nx * this.r, cy + uy * s2 + ny * this.r];
+    o.globalAlpha = 0.4; o.setLineDash([2 * scale, 4 * scale]);
+    o.beginPath(); o.moveTo(C[0], C[1]); o.lineTo(D[0], D[1]); o.stroke(); o.setLineDash([]);
+    o.globalAlpha = 0.65; o.textAlign = 'right';
+    o.fillText('Ø 2.0 nm', C[0] - 8 * scale, C[1] - 6 * scale);
+    if (this.marks && this.marks.length) {
+      const [a, b, x, y] = this.marks, mx2 = (a[0] + b[0]) / 2, my2 = (a[1] + b[1]) / 2;
+      o.globalAlpha = 0.5; o.textAlign = 'left';
+      o.beginPath(); o.moveTo(mx2, my2); o.lineTo(mx2 + 60 * scale, my2 - 90 * scale); o.lineTo(mx2 + 76 * scale, my2 - 90 * scale); o.stroke();
+      o.globalAlpha = 0.75;
+      o.fillText(`${x}–${y}   ${x === 'A' || x === 'T' ? '2' : '3'} H-bonds`, mx2 + 82 * scale, my2 - 90 * scale);
+    }
+    o.globalAlpha = 0.45; o.textAlign = 'left'; o.fillStyle = PAL[15];
+    o.fillText('reading frame → codons → amino acids', W * 0.24, H * 0.9 - 22 * scale);
+  },
+  hud(t) { return [`rotation ${((t * 0.45 * 180 / Math.PI) % 360).toFixed(1).padStart(5, '0')}°`]; }
+};
+
+
+// ===================== ENGINE (shared) =====================
+const THEMES = {
+  grey:  { hue: 220, sat: 7 },
+  warm:  { hue: 30, sat: 45 },
+  green: { hue: 140, sat: 85 },
+  ice:   { hue: 190, sat: 90 },
+  amber: { hue: 36,  sat: 95 }
+};
+const theme = THEMES[SETTINGS.theme] || THEMES.grey;
+
+const LEVELS = 24, PAL = [], RGB = [];
+function hsl2rgb(h, s, l) {
+  s /= 100; l /= 100;
+  const k = n => (n + h / 30) % 12, a = s * Math.min(l, 1 - l);
+  const f = n => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+  return [Math.round(f(0) * 255), Math.round(f(8) * 255), Math.round(f(4) * 255)];
+}
+for (let i = 0; i < LEVELS; i++) {
+  const t = i / (LEVELS - 1);
+  const s = Math.round(theme.sat * (1 - t * 0.78)), l = Math.round(18 + t * 72);
+  PAL.push(`hsl(${theme.hue},${s}%,${l}%)`);
+  RGB.push(hsl2rgb(theme.hue, s, l));
+}
+const shade = (t, a = 1) => {
+  const i = Math.max(0, Math.min(LEVELS - 1, Math.round(t * (LEVELS - 1))));
+  const c = RGB[i];
+  return `rgba(${c[0]},${c[1]},${c[2]},${a})`;
+};
+
+const base = document.getElementById('base'), over = document.getElementById('over');
+const ctx = base.getContext('2d'), octx = over.getContext('2d');
+let W, H, DPR, scale, bgSprite;
+let mx = 0, my = 0, smx = 0, smy = 0;
+
+const rand = (a, b) => a + Math.random() * (b - a);
+const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+const lerp = (a, b, t) => a + (b - a) * t;
+const TAU = Math.PI * 2;
+const GLYPHS = Array.from('01∂∫∇∑∏πλθφψΩμνσ∞≈≡≠≤≥√Δ±×∈∀∃ℏ{}<>=+-*/^|()[]');
+const pick = () => GLYPHS[(Math.random() * GLYPHS.length) | 0];
+// colour ramps for the realistic scenes: stops = [[t, [r,g,b]], ...]
+const ramp = (stops, t) => {
+  t = clamp(t, 0, 1);
+  for (let i = 1; i < stops.length; i++) if (t <= stops[i][0]) {
+    const [t0, c0] = stops[i - 1], [t1, c1] = stops[i], f = (t - t0) / (t1 - t0 || 1);
+    return [c0[0] + (c1[0] - c0[0]) * f, c0[1] + (c1[1] - c0[1]) * f, c0[2] + (c1[2] - c0[2]) * f];
+  }
+  return stops[stops.length - 1][1];
+};
+const mixc = (a, b, f) => [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f];
+const rgba = (c, a = 1) => `rgba(${c[0] | 0},${c[1] | 0},${c[2] | 0},${a})`;
+const toGrey = c => { const l = 0.3 * c[0] + 0.59 * c[1] + 0.11 * c[2]; return [l * 0.97, l, l * 1.04]; };
+const DARK = l => `hsl(${theme.hue},${Math.min(theme.sat, 10)}%,${l}%)`;   // near-black silhouette fill
+// deterministic pseudo-random from an integer (stable shapes every frame)
+const hash = n => { const x = Math.sin(n * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); };
+const MONO = s => `${(s * scale).toFixed(1)}px Consolas, "Cambria Math", "Segoe UI Symbol", "Courier New", monospace`;
+const MATHF = s => `italic ${(s * scale).toFixed(1)}px "Cambria Math", "Times New Roman", serif`;
+
+// Improved Perlin noise (3D)
+const PERM = new Uint8Array(512);
+(() => {
+  const p = []; for (let i = 0; i < 256; i++) p.push(i);
+  for (let i = 255; i > 0; i--) { const j = (Math.random() * (i + 1)) | 0; [p[i], p[j]] = [p[j], p[i]]; }
+  for (let i = 0; i < 512; i++) PERM[i] = p[i & 255];
+})();
+function noise3(x, y, z) {
+  const X = Math.floor(x) & 255, Y = Math.floor(y) & 255, Z = Math.floor(z) & 255;
+  x -= Math.floor(x); y -= Math.floor(y); z -= Math.floor(z);
+  const fd = t => t * t * t * (t * (t * 6 - 15) + 10);
+  const u = fd(x), v = fd(y), w = fd(z);
+  const grad = (h, x, y, z) => {
+    h &= 15; const a = h < 8 ? x : y, b = h < 4 ? y : (h === 12 || h === 14) ? x : z;
+    return ((h & 1) ? -a : a) + ((h & 2) ? -b : b);
+  };
+  const A = PERM[X] + Y, AA = PERM[A] + Z, AB = PERM[A + 1] + Z;
+  const B = PERM[X + 1] + Y, BA = PERM[B] + Z, BB = PERM[B + 1] + Z;
+  return lerp(
+    lerp(lerp(grad(PERM[AA], x, y, z), grad(PERM[BA], x - 1, y, z), u),
+         lerp(grad(PERM[AB], x, y - 1, z), grad(PERM[BB], x - 1, y - 1, z), u), v),
+    lerp(lerp(grad(PERM[AA + 1], x, y, z - 1), grad(PERM[BA + 1], x - 1, y, z - 1), u),
+         lerp(grad(PERM[AB + 1], x, y - 1, z - 1), grad(PERM[BB + 1], x - 1, y - 1, z - 1), u), v), w);
+}
+
+// Background: dark vertical gradient + soft glow at the scene's focus + vignette
+function makeBg() {
+  const c = document.createElement('canvas');
+  c.width = base.width; c.height = base.height;
+  const g = c.getContext('2d');
+  g.setTransform(DPR, 0, 0, DPR, 0, 0);
+  const s = Math.min(theme.sat, 12), h = theme.hue;
+  const lin = g.createLinearGradient(0, 0, 0, H);
+  lin.addColorStop(0, `hsl(${h},${s}%,7%)`);
+  lin.addColorStop(1, `hsl(${h},${s}%,2.5%)`);
+  g.fillStyle = lin; g.fillRect(0, 0, W, H);
+  const fx = SCENE.focus[0] * W, fy = SCENE.focus[1] * H;
+  const rad = g.createRadialGradient(fx, fy, 0, fx, fy, Math.max(W, H) * 0.65);
+  rad.addColorStop(0, `hsla(${h},${s}%,30%,${SCENE.glow ?? 0.28})`);
+  rad.addColorStop(0.35, `hsla(${h},${s}%,16%,0.16)`);
+  rad.addColorStop(1, `hsla(${h},${s}%,0%,0)`);
+  g.fillStyle = rad; g.fillRect(0, 0, W, H);
+  const vig = g.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.35, W / 2, H / 2, Math.max(W, H) * 0.75);
+  vig.addColorStop(0, 'rgba(0,0,0,0)');
+  vig.addColorStop(1, 'rgba(0,0,0,0.55)');
+  g.fillStyle = vig; g.fillRect(0, 0, W, H);
+  if (SCENE.ambient !== false) {
+    // faint graph-paper dots, with a small cross every fourth point
+    const sp = 46 * scale;
+    g.fillStyle = PAL[14]; g.strokeStyle = PAL[14]; g.lineWidth = 0.8 * scale;
+    for (let i = 0, x = sp / 2; x < W; x += sp, i++) {
+      for (let j = 0, y = sp / 2; y < H; y += sp, j++) {
+        if (i % 4 === 0 && j % 4 === 0) {
+          g.globalAlpha = 0.13;
+          g.beginPath(); g.moveTo(x - 3 * scale, y); g.lineTo(x + 3 * scale, y); g.moveTo(x, y - 3 * scale); g.lineTo(x, y + 3 * scale); g.stroke();
+        } else { g.globalAlpha = 0.08; g.fillRect(x - 0.6 * scale, y - 0.6 * scale, 1.2 * scale, 1.2 * scale); }
+      }
+    }
+    // rulers along the top and bottom edges
+    g.globalAlpha = 0.16;
+    g.beginPath();
+    for (let k = 0, x = 0; x < W; x += 10 * scale, k++) {
+      const L = (k % 10 === 0 ? 9 : k % 5 === 0 ? 5 : 2.5) * scale;
+      g.moveTo(x, 0); g.lineTo(x, L); g.moveTo(x, H); g.lineTo(x, H - L);
+    }
+    g.stroke();
+    // corner crop marks
+    g.globalAlpha = 0.25;
+    const m = 18 * scale, q = 14 * scale;
+    g.beginPath();
+    for (const [x, y, sx, sy] of [[m, m, 1, 1], [W - m, m, -1, 1], [m, H - m, 1, -1], [W - m, H - m, -1, -1]]) {
+      g.moveTo(x, y + sy * q); g.lineTo(x, y); g.lineTo(x + sx * q, y);
+    }
+    g.stroke();
+    g.globalAlpha = 1;
+  }
+  return c;
+}
+
+// drifting faint characters, like dust in the light
+const dust = [];
+function drawDust(dt) {
+  if (SCENE.dust === false) return;
+  if (!dust.length) for (let i = 0; i < 30; i++) dust.push({ x: Math.random(), y: Math.random(), vx: rand(-0.004, 0.004), vy: rand(-0.006, -0.0015), g: pick(), a: rand(0.07, 0.18), s: rand(9, 12) });
+  const o = octx;
+  o.save(); o.textAlign = 'center'; o.textBaseline = 'middle'; o.fillStyle = PAL[16];
+  for (const d of dust) {
+    d.x += d.vx * dt; d.y += d.vy * dt;
+    if (d.y < -0.02) { d.y = 1.02; d.x = Math.random(); d.g = pick(); }
+    if (d.x < -0.02) d.x = 1.02; if (d.x > 1.02) d.x = -0.02;
+    o.globalAlpha = d.a; o.font = MONO(d.s);
+    o.fillText(d.g, d.x * W, d.y * H);
+  }
+  o.restore();
+}
+
+// ---------- Overlay: equations typed out + top-right readout ----------
+const EQ_ANCHORS = SCENE.anchors || [[0.30, 0.12], [0.58, 0.08], [0.26, 0.87], [0.60, 0.93], [0.34, 0.32], [0.74, 0.80]];
+const eqSlots = [{ eq: -1, anchor: -1, age: 0, dur: 0 }, { eq: -1, anchor: -1, age: -5, dur: 0 }];
+let eqNext = (Math.random() * SCENE.eqs.length) | 0;
+function eqAssign(s) {
+  s.eq = eqNext; eqNext = (eqNext + 1) % SCENE.eqs.length;
+  const used = eqSlots.map(o => o.anchor);
+  let a; do { a = (Math.random() * EQ_ANCHORS.length) | 0; } while (used.includes(a));
+  s.anchor = a;
+  s.dur = SCENE.eqs[s.eq].e.length / 20 + 8;
+}
+function drawOverlay(t, dt) {
+  if (!SETTINGS.math) return;
+  const o = octx;
+  o.save();
+  o.textBaseline = 'middle';
+  for (const s of eqSlots) {
+    if (s.eq < 0) eqAssign(s);
+    s.age += dt;
+    if (s.age < 0) continue;
+    if (s.age > s.dur) { eqAssign(s); s.age = -2; continue; }
+    const q = SCENE.eqs[s.eq], n = Math.min(q.e.length, Math.floor(s.age * 20));
+    const fade = clamp((s.dur - s.age) / 1.5, 0, 1) * clamp(s.age * 2, 0, 1);
+    const x = EQ_ANCHORS[s.anchor][0] * W, y = EQ_ANCHORS[s.anchor][1] * H;
+    o.textAlign = 'left';
+    o.font = MATHF(15.5);
+    o.globalAlpha = 0.8 * fade; o.fillStyle = PAL[20];
+    const shown = q.e.slice(0, n);
+    o.fillText(shown, x, y);
+    if (n < q.e.length) {
+      const w = o.measureText(shown).width;
+      o.fillRect(x + w + 3 * scale, y - 8 * scale, 1.4 * scale, 16 * scale);
+    } else {
+      o.font = MONO(10.5); o.fillStyle = PAL[13];
+      o.globalAlpha = 0.6 * fade * clamp((s.age - q.e.length / 20) * 1.5, 0, 1);
+      o.fillText('— ' + q.n, x, y + 20 * scale);
+    }
+  }
+  o.font = MONO(10.5); o.textAlign = 'right'; o.textBaseline = 'top';
+  const hx = W - 28 * scale; let hy = 26 * scale;
+  const lines = [[SCENE.title, 0.62, 13], [SCENE.sub, 0.48, 13], ...(SCENE.hud ? SCENE.hud(t).map(l => [l, 0.48, 13]) : []),
+                 [`t = ${t.toFixed(2).padStart(9, '0')} s`, 0.75, 20]];
+  for (const [txt, al, c] of lines) { o.globalAlpha = al; o.fillStyle = PAL[c]; o.fillText(txt, hx, hy); hy += 16 * scale; }
+  o.restore();
+}
+
+// ---------- Boot ----------
+function setup() {
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  W = window.innerWidth; H = window.innerHeight;
+  for (const c of [base, over]) { c.width = Math.round(W * DPR); c.height = Math.round(H * DPR); }
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  octx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  scale = Math.max(0.6, Math.min(W, H) / 1080);
+  bgSprite = makeBg();
+  ctx.drawImage(bgSprite, 0, 0, W, H);
+  SCENE.init();
+}
+
+let last = performance.now(), acc = 0, T0 = performance.now();
+function loop(now) {
+  requestAnimationFrame(loop);
+  acc += now - last; last = now;
+  if (acc < 1000 / SETTINGS.fps - 1) return;
+  const dt = Math.min(acc / 1000, 0.1);
+  acc = 0;
+  const t = (now - T0) / 1000;
+  smx += (mx - smx) * 0.05; smy += (my - smy) * 0.05;
+  const off = SETTINGS.parallax ? 12 * scale : 0;
+  const ox = smx * off, oy = smy * off;
+  if (SCENE.update) SCENE.update(dt, t);
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.globalAlpha = SCENE.trail || 1;
+  ctx.drawImage(bgSprite, 0, 0, W, H);
+  ctx.globalAlpha = 1;
+  SCENE.draw(t, ox, oy);
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.globalAlpha = 1;
+  octx.clearRect(0, 0, W, H);
+  drawDust(dt);
+  if (SCENE.drawOver) { octx.save(); SCENE.drawOver(t, ox, oy); octx.restore(); }
+  drawOverlay(t, dt);
+}
+window.addEventListener('mousemove', e => { mx = (e.clientX / W) * 2 - 1; my = (e.clientY / H) * 2 - 1; });
+let rt;
+window.addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(setup, 200); });
+setup();
+requestAnimationFrame(loop);
+
+</script>
+</body>
+</html>

@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Gothic Cathedral · Elevation</title>
+<!--
+  Gothic Cathedral · Elevation — live wallpaper for Lively Wallpaper (grey · mathematical series)
+  Add it in Lively: click "+" → choose this file.
+  Change the SETTINGS block below with Notepad, save, then re-add in Lively.
+-->
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; }
+</style>
+</head>
+<body>
+<canvas id="base"></canvas>
+<canvas id="over"></canvas>
+<script>
+// ===================== SETTINGS =====================
+const SETTINGS = {
+  theme: 'grey',    // 'grey' | 'warm' | 'green' | 'ice' | 'amber'
+  math: true,       // equations, labels and readouts (false = clean version)
+  parallax: true,   // gentle shift with the mouse
+  fps: 30,          // frame cap; 30 keeps the GPU/CPU load low
+};
+// ====================================================
+
+// Architecture — a Gothic cathedral front drawn like an architect's elevation. The rose window's 12-fold tracery
+// turns slowly, pointed arches show their two construction circles, and stars wheel overhead.
+const SCENE = {
+  focus: [0.62, 0.5],
+  anchors: [[0.24, 0.08], [0.46, 0.05], [0.2, 0.3], [0.2, 0.5], [0.2, 0.7], [0.2, 0.9]],
+  title: 'GOTHIC CATHEDRAL · WEST ELEVATION',
+  sub: 'equilateral arches · rose window D₁₂',
+  eqs: [
+    { e: 'R = span', n: 'equilateral pointed arch: each side is an arc centred on the opposite springing' },
+    { e: 'h = span · sin 60° ≈ 0.866 · span', n: 'rise of an equilateral arch' },
+    { e: 'D₁₂', n: 'symmetry group of the rose window: 12 rotations, 12 reflections' },
+    { e: 'y = a cosh(x / a)', n: 'catenary — the ideal shape for an arch in pure compression' },
+    { e: 'H_thrust = w L² / (8 f)', n: 'horizontal thrust that flying buttresses resist' },
+    { e: 'φ = (1 + √5) / 2', n: 'proportions often set out with the golden ratio' }
+  ],
+  init() {
+    this.stars = [];
+    for (let i = 0; i < 220; i++) this.stars.push([Math.random(), Math.random() * 0.8, rand(0.08, 0.45), rand(0.8, 1.6)]);
+    this.ground = H * 0.9;
+    this.u = H * 0.09;     // module
+  },
+  update() {},
+  arch(cx, ys, s, legs) {
+    ctx.moveTo(cx - s / 2, ys + legs); ctx.lineTo(cx - s / 2, ys);
+    ctx.arc(cx + s / 2, ys, s, Math.PI, Math.PI * 4 / 3);
+    ctx.arc(cx - s / 2, ys, s, -Math.PI / 3, 0);
+    ctx.lineTo(cx + s / 2, ys + legs);
+  },
+  rose(cx, cy, R, a) {
+    ctx.beginPath(); ctx.arc(cx, cy, R, 0, TAU); ctx.arc(cx, cy, R * 0.92, 0, TAU);
+    ctx.moveTo(cx + R * 0.22, cy); ctx.arc(cx, cy, R * 0.22, 0, TAU);
+    for (let k = 0; k < 12; k++) {
+      const b = a + k * TAU / 12, c = Math.cos(b), s = Math.sin(b);
+      ctx.moveTo(cx + c * R * 0.22, cy + s * R * 0.22); ctx.lineTo(cx + c * R * 0.92, cy + s * R * 0.92);
+      const pr = R * 0.17, px = cx + Math.cos(b + Math.PI / 12) * R * 0.62, py = cy + Math.sin(b + Math.PI / 12) * R * 0.62;
+      ctx.moveTo(px + pr, py); ctx.arc(px, py, pr, 0, TAU);
+      const qr = R * 0.07, qx = cx + Math.cos(b + Math.PI / 12) * R * 0.84, qy = cy + Math.sin(b + Math.PI / 12) * R * 0.84;
+      ctx.moveTo(qx + qr, qy); ctx.arc(qx, qy, qr, 0, TAU);
+      const fx = cx + c * R * 0.35, fy = cy + s * R * 0.35, fr = R * 0.08;
+      ctx.moveTo(fx + fr, fy); ctx.arc(fx, fy, fr, 0, TAU);
+    }
+  },
+  draw(t, ox, oy) {
+    const cx = this.focus[0] * W + ox, g = this.ground + oy, u = this.u;
+    ctx.globalCompositeOperation = 'lighter';
+    // slowly wheeling stars (around a pole above the towers)
+    const pole = [cx, H * 0.05], rot = t * 0.004;
+    for (const s of this.stars) {
+      const dx = s[0] * W - pole[0], dy = s[1] * H - pole[1], c = Math.cos(rot), sn = Math.sin(rot);
+      ctx.globalAlpha = s[2]; ctx.fillStyle = PAL[19];
+      ctx.fillRect(pole[0] + dx * c - dy * sn, pole[1] + dx * sn + dy * c, s[3] * scale, s[3] * scale);
+    }
+    const nave = { w: u * 3.4, h: u * 5.2 }, tw = u * 1.5, th = u * 6.6;
+    const shapes = [];
+    // towers with spires
+    for (const side of [-1, 1]) {
+      const x = cx + side * (nave.w / 2 + tw / 2);
+      shapes.push(() => { ctx.rect(x - tw / 2, g - th, tw, th); ctx.moveTo(x - tw / 2, g - th); ctx.lineTo(x, g - th - u * 3.2); ctx.lineTo(x + tw / 2, g - th); });
+    }
+    shapes.push(() => { ctx.rect(cx - nave.w / 2, g - nave.h, nave.w, nave.h); ctx.moveTo(cx - nave.w / 2, g - nave.h); ctx.lineTo(cx, g - nave.h - u * 1.6); ctx.lineTo(cx + nave.w / 2, g - nave.h); });
+    // occluding fills then outlines
+    ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 0.96; ctx.fillStyle = DARK(4);
+    for (const f of shapes) { ctx.beginPath(); f(); ctx.fill(); }
+    // flying buttresses
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.lineWidth = 1.1 * scale; ctx.strokeStyle = PAL[17]; ctx.globalAlpha = 0.5;
+    for (const side of [-1, 1]) {
+      const x0 = cx + side * (nave.w / 2 + tw), pier = x0 + side * u * 1.6;
+      ctx.beginPath(); ctx.rect(Math.min(pier, pier + side * u * 0.4), g - u * 3.2, u * 0.4, u * 3.2); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(pier, g - u * 3.0); ctx.quadraticCurveTo(x0 + side * u * 0.6, g - u * 3.4, x0, g - u * 4.4); ctx.moveTo(pier, g - u * 2.4); ctx.quadraticCurveTo(x0 + side * u * 0.5, g - u * 2.6, x0, g - u * 3.6); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(pier + side * u * 0.2, g - u * 3.2); ctx.lineTo(pier + side * u * 0.2, g - u * 4); ctx.stroke();
+    }
+    ctx.globalAlpha = 0.7; ctx.strokeStyle = PAL[19]; ctx.lineWidth = 1.2 * scale;
+    for (const f of shapes) { ctx.beginPath(); f(); ctx.stroke(); }
+    // tower details: lancet windows, string courses, crockets on spires
+    ctx.lineWidth = 0.9 * scale;
+    for (const side of [-1, 1]) {
+      const x = cx + side * (nave.w / 2 + tw / 2);
+      ctx.globalAlpha = 0.45; ctx.strokeStyle = PAL[17];
+      ctx.beginPath();
+      for (let lv = 0; lv < 3; lv++) {
+        const ys = g - u * (2.2 + lv * 1.6);
+        for (const dx of [-0.25, 0.25]) this.arch(x + dx * tw, ys, tw * 0.28, u * 0.9);
+        ctx.moveTo(x - tw / 2, ys + u * 1.05); ctx.lineTo(x + tw / 2, ys + u * 1.05);
+      }
+      ctx.stroke();
+      ctx.globalAlpha = 0.35; ctx.beginPath();
+      for (let k = 1; k <= 6; k++) { const yy = g - th - u * 3.2 * k / 7, xx = tw / 2 * (1 - k / 7); ctx.moveTo(x - xx, yy); ctx.lineTo(x - xx - 4 * scale, yy - 4 * scale); ctx.moveTo(x + xx, yy); ctx.lineTo(x + xx + 4 * scale, yy - 4 * scale); }
+      ctx.stroke();
+      ctx.globalAlpha = 0.8; ctx.beginPath(); ctx.moveTo(x, g - th - u * 3.2); ctx.lineTo(x, g - th - u * 3.6); ctx.moveTo(x - 4 * scale, g - th - u * 3.45); ctx.lineTo(x + 4 * scale, g - th - u * 3.45); ctx.stroke();
+    }
+    // portals (three equilateral arches), gallery of kings
+    ctx.globalAlpha = 0.65; ctx.strokeStyle = PAL[19]; ctx.lineWidth = 1.1 * scale;
+    ctx.beginPath();
+    this.arch(cx, g - u * 1.3, u * 1.5, u * 1.3); this.arch(cx, g - u * 1.3, u * 1.2, u * 1.3); this.arch(cx, g - u * 1.3, u * 0.9, u * 1.3);
+    for (const side of [-1, 1]) { const x = cx + side * (nave.w / 2 + tw / 2); this.arch(x, g - u * 0.9, tw * 0.55, u * 0.9); }
+    ctx.stroke();
+    ctx.globalAlpha = 0.35; ctx.beginPath();
+    for (let k = 0; k < 9; k++) { const x = cx - nave.w / 2 + nave.w * (k + 0.5) / 9; this.arch(x, g - u * 2.7, nave.w / 11, u * 0.35); }
+    ctx.moveTo(cx - nave.w / 2, g - u * 2.4); ctx.lineTo(cx + nave.w / 2, g - u * 2.4);
+    ctx.stroke();
+    // rose window: soft glow, then turning tracery
+    const rc = [cx, g - u * 3.8], R = u * 1.15;
+    const gl = ctx.createRadialGradient(rc[0], rc[1], 0, rc[0], rc[1], R * 1.4);
+    gl.addColorStop(0, shade(0.9, 0.22)); gl.addColorStop(1, shade(0.6, 0));
+    ctx.globalAlpha = 0.8 + 0.2 * Math.sin(t * 0.4); ctx.fillStyle = gl; ctx.beginPath(); ctx.arc(rc[0], rc[1], R * 1.4, 0, TAU); ctx.fill();
+    this.rose(rc[0], rc[1], R, t * 0.04);
+    ctx.globalAlpha = 0.75; ctx.strokeStyle = PAL[21]; ctx.lineWidth = 1 * scale; ctx.stroke();
+    // ground line and pavement grid in perspective
+    ctx.globalAlpha = 0.5; ctx.strokeStyle = PAL[17]; ctx.beginPath(); ctx.moveTo(0, g); ctx.lineTo(W, g); ctx.stroke();
+    ctx.globalAlpha = 0.1; ctx.beginPath();
+    for (let k = -12; k <= 12; k++) { ctx.moveTo(cx + k * u * 0.5, g); ctx.lineTo(cx + k * u * 1.8, H); }
+    for (let k = 1; k < 5; k++) { const y = g + (H - g) * (k / 5) ** 1.4; ctx.moveTo(0, y); ctx.lineTo(W, y); }
+    ctx.stroke();
+    this.geo = { cx, g, u, rc, R, nave, tw, th };
+  },
+  drawOver(t) {
+    if (!SETTINGS.math || !this.geo) return;
+    const o = octx, { cx, g, u, rc, R, nave, tw, th } = this.geo;
+    o.lineWidth = 0.8 * scale; o.font = MONO(10.5); o.textBaseline = 'middle';
+    // construction circles of the main portal arch
+    const ys = g - u * 1.3, s = u * 1.5;
+    o.globalAlpha = 0.25; o.strokeStyle = PAL[20]; o.setLineDash([3 * scale, 4 * scale]);
+    o.beginPath(); o.arc(cx - s / 2, ys, s, 0, TAU); o.moveTo(cx + s / 2 + s, ys); o.arc(cx + s / 2, ys, s, 0, TAU); o.stroke(); o.setLineDash([]);
+    o.globalAlpha = 0.7; o.fillStyle = PAL[20];
+    for (const x of [cx - s / 2, cx + s / 2]) { o.beginPath(); o.arc(x, ys, 2.5 * scale, 0, TAU); o.fill(); }
+    o.textAlign = 'left'; o.fillText('R = span', cx + s * 1.6, ys - s * 0.2);
+    // rose window: radius and 30° sector
+    o.globalAlpha = 0.5; o.strokeStyle = PAL[18];
+    o.beginPath(); o.moveTo(rc[0], rc[1]); o.lineTo(rc[0] + R * 1.25, rc[1]); o.stroke();
+    o.beginPath(); o.arc(rc[0], rc[1], R * 1.18, -Math.PI / 12, Math.PI / 12); o.stroke();
+    o.fillStyle = PAL[18]; o.fillText('30° = 360° / 12', rc[0] + R * 1.3, rc[1] - 10 * scale);
+    // overall dimensions
+    const left = cx - nave.w / 2 - tw, right = cx + nave.w / 2 + tw, top = g - th - u * 3.6;
+    o.globalAlpha = 0.4; o.strokeStyle = PAL[16];
+    o.beginPath(); o.moveTo(left, g + u * 0.6); o.lineTo(right, g + u * 0.6); o.moveTo(left, g + u * 0.45); o.lineTo(left, g + u * 0.75); o.moveTo(right, g + u * 0.45); o.lineTo(right, g + u * 0.75);
+    o.moveTo(right + u * 1.9, g); o.lineTo(right + u * 1.9, top); o.moveTo(right + u * 1.75, g); o.lineTo(right + u * 2.05, g); o.moveTo(right + u * 1.75, top); o.lineTo(right + u * 2.05, top);
+    o.stroke();
+    o.globalAlpha = 0.6; o.fillStyle = PAL[17]; o.textAlign = 'center';
+    o.fillText(`width ${((right - left) / u * 6.5).toFixed(0)} m`, (left + right) / 2, g + u * 0.85);
+    o.textAlign = 'left'; o.fillText(`height ${((g - top) / u * 6.5).toFixed(0)} m`, right + u * 2.1, (g + top) / 2);
+  },
+  hud() { return ['scale: 1 module ≈ 6.5 m']; }
+};
+
+
+// ===================== ENGINE (shared) =====================
+const THEMES = {
+  grey:  { hue: 220, sat: 7 },
+  warm:  { hue: 30, sat: 45 },
+  green: { hue: 140, sat: 85 },
+  ice:   { hue: 190, sat: 90 },
+  amber: { hue: 36,  sat: 95 }
+};
+const theme = THEMES[SETTINGS.theme] || THEMES.grey;
+
+const LEVELS = 24, PAL = [], RGB = [];
+function hsl2rgb(h, s, l) {
+  s /= 100; l /= 100;
+  const k = n => (n + h / 30) % 12, a = s * Math.min(l, 1 - l);
+  const f = n => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+  return [Math.round(f(0) * 255), Math.round(f(8) * 255), Math.round(f(4) * 255)];
+}
+for (let i = 0; i < LEVELS; i++) {
+  const t = i / (LEVELS - 1);
+  const s = Math.round(theme.sat * (1 - t * 0.78)), l = Math.round(18 + t * 72);
+  PAL.push(`hsl(${theme.hue},${s}%,${l}%)`);
+  RGB.push(hsl2rgb(theme.hue, s, l));
+}
+const shade = (t, a = 1) => {
+  const i = Math.max(0, Math.min(LEVELS - 1, Math.round(t * (LEVELS - 1))));
+  const c = RGB[i];
+  return `rgba(${c[0]},${c[1]},${c[2]},${a})`;
+};
+
+const base = document.getElementById('base'), over = document.getElementById('over');
+const ctx = base.getContext('2d'), octx = over.getContext('2d');
+let W, H, DPR, scale, bgSprite;
+let mx = 0, my = 0, smx = 0, smy = 0;
+
+const rand = (a, b) => a + Math.random() * (b - a);
+const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+const lerp = (a, b, t) => a + (b - a) * t;
+const TAU = Math.PI * 2;
+const GLYPHS = Array.from('01∂∫∇∑∏πλθφψΩμνσ∞≈≡≠≤≥√Δ±×∈∀∃ℏ{}<>=+-*/^|()[]');
+const pick = () => GLYPHS[(Math.random() * GLYPHS.length) | 0];
+// colour ramps for the realistic scenes: stops = [[t, [r,g,b]], ...]
+const ramp = (stops, t) => {
+  t = clamp(t, 0, 1);
+  for (let i = 1; i < stops.length; i++) if (t <= stops[i][0]) {
+    const [t0, c0] = stops[i - 1], [t1, c1] = stops[i], f = (t - t0) / (t1 - t0 || 1);
+    return [c0[0] + (c1[0] - c0[0]) * f, c0[1] + (c1[1] - c0[1]) * f, c0[2] + (c1[2] - c0[2]) * f];
+  }
+  return stops[stops.length - 1][1];
+};
+const mixc = (a, b, f) => [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f];
+const rgba = (c, a = 1) => `rgba(${c[0] | 0},${c[1] | 0},${c[2] | 0},${a})`;
+const toGrey = c => { const l = 0.3 * c[0] + 0.59 * c[1] + 0.11 * c[2]; return [l * 0.97, l, l * 1.04]; };
+const DARK = l => `hsl(${theme.hue},${Math.min(theme.sat, 10)}%,${l}%)`;   // near-black silhouette fill
+// deterministic pseudo-random from an integer (stable shapes every frame)
+const hash = n => { const x = Math.sin(n * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); };
+const MONO = s => `${(s * scale).toFixed(1)}px Consolas, "Cambria Math", "Segoe UI Symbol", "Courier New", monospace`;
+const MATHF = s => `italic ${(s * scale).toFixed(1)}px "Cambria Math", "Times New Roman", serif`;
+
+// Improved Perlin noise (3D)
+const PERM = new Uint8Array(512);
+(() => {
+  const p = []; for (let i = 0; i < 256; i++) p.push(i);
+  for (let i = 255; i > 0; i--) { const j = (Math.random() * (i + 1)) | 0; [p[i], p[j]] = [p[j], p[i]]; }
+  for (let i = 0; i < 512; i++) PERM[i] = p[i & 255];
+})();
+function noise3(x, y, z) {
+  const X = Math.floor(x) & 255, Y = Math.floor(y) & 255, Z = Math.floor(z) & 255;
+  x -= Math.floor(x); y -= Math.floor(y); z -= Math.floor(z);
+  const fd = t => t * t * t * (t * (t * 6 - 15) + 10);
+  const u = fd(x), v = fd(y), w = fd(z);
+  const grad = (h, x, y, z) => {
+    h &= 15; const a = h < 8 ? x : y, b = h < 4 ? y : (h === 12 || h === 14) ? x : z;
+    return ((h & 1) ? -a : a) + ((h & 2) ? -b : b);
+  };
+  const A = PERM[X] + Y, AA = PERM[A] + Z, AB = PERM[A + 1] + Z;
+  const B = PERM[X + 1] + Y, BA = PERM[B] + Z, BB = PERM[B + 1] + Z;
+  return lerp(
+    lerp(lerp(grad(PERM[AA], x, y, z), grad(PERM[BA], x - 1, y, z), u),
+         lerp(grad(PERM[AB], x, y - 1, z), grad(PERM[BB], x - 1, y - 1, z), u), v),
+    lerp(lerp(grad(PERM[AA + 1], x, y, z - 1), grad(PERM[BA + 1], x - 1, y, z - 1), u),
+         lerp(grad(PERM[AB + 1], x, y - 1, z - 1), grad(PERM[BB + 1], x - 1, y - 1, z - 1), u), v), w);
+}
+
+// Background: dark vertical gradient + soft glow at the scene's focus + vignette
+function makeBg() {
+  const c = document.createElement('canvas');
+  c.width = base.width; c.height = base.height;
+  const g = c.getContext('2d');
+  g.setTransform(DPR, 0, 0, DPR, 0, 0);
+  const s = Math.min(theme.sat, 12), h = theme.hue;
+  const lin = g.createLinearGradient(0, 0, 0, H);
+  lin.addColorStop(0, `hsl(${h},${s}%,7%)`);
+  lin.addColorStop(1, `hsl(${h},${s}%,2.5%)`);
+  g.fillStyle = lin; g.fillRect(0, 0, W, H);
+  const fx = SCENE.focus[0] * W, fy = SCENE.focus[1] * H;
+  const rad = g.createRadialGradient(fx, fy, 0, fx, fy, Math.max(W, H) * 0.65);
+  rad.addColorStop(0, `hsla(${h},${s}%,30%,${SCENE.glow ?? 0.28})`);
+  rad.addColorStop(0.35, `hsla(${h},${s}%,16%,0.16)`);
+  rad.addColorStop(1, `hsla(${h},${s}%,0%,0)`);
+  g.fillStyle = rad; g.fillRect(0, 0, W, H);
+  const vig = g.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.35, W / 2, H / 2, Math.max(W, H) * 0.75);
+  vig.addColorStop(0, 'rgba(0,0,0,0)');
+  vig.addColorStop(1, 'rgba(0,0,0,0.55)');
+  g.fillStyle = vig; g.fillRect(0, 0, W, H);
+  if (SCENE.ambient !== false) {
+    // faint graph-paper dots, with a small cross every fourth point
+    const sp = 46 * scale;
+    g.fillStyle = PAL[14]; g.strokeStyle = PAL[14]; g.lineWidth = 0.8 * scale;
+    for (let i = 0, x = sp / 2; x < W; x += sp, i++) {
+      for (let j = 0, y = sp / 2; y < H; y += sp, j++) {
+        if (i % 4 === 0 && j % 4 === 0) {
+          g.globalAlpha = 0.13;
+          g.beginPath(); g.moveTo(x - 3 * scale, y); g.lineTo(x + 3 * scale, y); g.moveTo(x, y - 3 * scale); g.lineTo(x, y + 3 * scale); g.stroke();
+        } else { g.globalAlpha = 0.08; g.fillRect(x - 0.6 * scale, y - 0.6 * scale, 1.2 * scale, 1.2 * scale); }
+      }
+    }
+    // rulers along the top and bottom edges
+    g.globalAlpha = 0.16;
+    g.beginPath();
+    for (let k = 0, x = 0; x < W; x += 10 * scale, k++) {
+      const L = (k % 10 === 0 ? 9 : k % 5 === 0 ? 5 : 2.5) * scale;
+      g.moveTo(x, 0); g.lineTo(x, L); g.moveTo(x, H); g.lineTo(x, H - L);
+    }
+    g.stroke();
+    // corner crop marks
+    g.globalAlpha = 0.25;
+    const m = 18 * scale, q = 14 * scale;
+    g.beginPath();
+    for (const [x, y, sx, sy] of [[m, m, 1, 1], [W - m, m, -1, 1], [m, H - m, 1, -1], [W - m, H - m, -1, -1]]) {
+      g.moveTo(x, y + sy * q); g.lineTo(x, y); g.lineTo(x + sx * q, y);
+    }
+    g.stroke();
+    g.globalAlpha = 1;
+  }
+  return c;
+}
+
+// drifting faint characters, like dust in the light
+const dust = [];
+function drawDust(dt) {
+  if (SCENE.dust === false) return;
+  if (!dust.length) for (let i = 0; i < 30; i++) dust.push({ x: Math.random(), y: Math.random(), vx: rand(-0.004, 0.004), vy: rand(-0.006, -0.0015), g: pick(), a: rand(0.07, 0.18), s: rand(9, 12) });
+  const o = octx;
+  o.save(); o.textAlign = 'center'; o.textBaseline = 'middle'; o.fillStyle = PAL[16];
+  for (const d of dust) {
+    d.x += d.vx * dt; d.y += d.vy * dt;
+    if (d.y < -0.02) { d.y = 1.02; d.x = Math.random(); d.g = pick(); }
+    if (d.x < -0.02) d.x = 1.02; if (d.x > 1.02) d.x = -0.02;
+    o.globalAlpha = d.a; o.font = MONO(d.s);
+    o.fillText(d.g, d.x * W, d.y * H);
+  }
+  o.restore();
+}
+
+// ---------- Overlay: equations typed out + top-right readout ----------
+const EQ_ANCHORS = SCENE.anchors || [[0.30, 0.12], [0.58, 0.08], [0.26, 0.87], [0.60, 0.93], [0.34, 0.32], [0.74, 0.80]];
+const eqSlots = [{ eq: -1, anchor: -1, age: 0, dur: 0 }, { eq: -1, anchor: -1, age: -5, dur: 0 }];
+let eqNext = (Math.random() * SCENE.eqs.length) | 0;
+function eqAssign(s) {
+  s.eq = eqNext; eqNext = (eqNext + 1) % SCENE.eqs.length;
+  const used = eqSlots.map(o => o.anchor);
+  let a; do { a = (Math.random() * EQ_ANCHORS.length) | 0; } while (used.includes(a));
+  s.anchor = a;
+  s.dur = SCENE.eqs[s.eq].e.length / 20 + 8;
+}
+function drawOverlay(t, dt) {
+  if (!SETTINGS.math) return;
+  const o = octx;
+  o.save();
+  o.textBaseline = 'middle';
+  for (const s of eqSlots) {
+    if (s.eq < 0) eqAssign(s);
+    s.age += dt;
+    if (s.age < 0) continue;
+    if (s.age > s.dur) { eqAssign(s); s.age = -2; continue; }
+    const q = SCENE.eqs[s.eq], n = Math.min(q.e.length, Math.floor(s.age * 20));
+    const fade = clamp((s.dur - s.age) / 1.5, 0, 1) * clamp(s.age * 2, 0, 1);
+    const x = EQ_ANCHORS[s.anchor][0] * W, y = EQ_ANCHORS[s.anchor][1] * H;
+    o.textAlign = 'left';
+    o.font = MATHF(15.5);
+    o.globalAlpha = 0.8 * fade; o.fillStyle = PAL[20];
+    const shown = q.e.slice(0, n);
+    o.fillText(shown, x, y);
+    if (n < q.e.length) {
+      const w = o.measureText(shown).width;
+      o.fillRect(x + w + 3 * scale, y - 8 * scale, 1.4 * scale, 16 * scale);
+    } else {
+      o.font = MONO(10.5); o.fillStyle = PAL[13];
+      o.globalAlpha = 0.6 * fade * clamp((s.age - q.e.length / 20) * 1.5, 0, 1);
+      o.fillText('— ' + q.n, x, y + 20 * scale);
+    }
+  }
+  o.font = MONO(10.5); o.textAlign = 'right'; o.textBaseline = 'top';
+  const hx = W - 28 * scale; let hy = 26 * scale;
+  const lines = [[SCENE.title, 0.62, 13], [SCENE.sub, 0.48, 13], ...(SCENE.hud ? SCENE.hud(t).map(l => [l, 0.48, 13]) : []),
+                 [`t = ${t.toFixed(2).padStart(9, '0')} s`, 0.75, 20]];
+  for (const [txt, al, c] of lines) { o.globalAlpha = al; o.fillStyle = PAL[c]; o.fillText(txt, hx, hy); hy += 16 * scale; }
+  o.restore();
+}
+
+// ---------- Boot ----------
+function setup() {
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  W = window.innerWidth; H = window.innerHeight;
+  for (const c of [base, over]) { c.width = Math.round(W * DPR); c.height = Math.round(H * DPR); }
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  octx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  scale = Math.max(0.6, Math.min(W, H) / 1080);
+  bgSprite = makeBg();
+  ctx.drawImage(bgSprite, 0, 0, W, H);
+  SCENE.init();
+}
+
+let last = performance.now(), acc = 0, T0 = performance.now();
+function loop(now) {
+  requestAnimationFrame(loop);
+  acc += now - last; last = now;
+  if (acc < 1000 / SETTINGS.fps - 1) return;
+  const dt = Math.min(acc / 1000, 0.1);
+  acc = 0;
+  const t = (now - T0) / 1000;
+  smx += (mx - smx) * 0.05; smy += (my - smy) * 0.05;
+  const off = SETTINGS.parallax ? 12 * scale : 0;
+  const ox = smx * off, oy = smy * off;
+  if (SCENE.update) SCENE.update(dt, t);
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.globalAlpha = SCENE.trail || 1;
+  ctx.drawImage(bgSprite, 0, 0, W, H);
+  ctx.globalAlpha = 1;
+  SCENE.draw(t, ox, oy);
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.globalAlpha = 1;
+  octx.clearRect(0, 0, W, H);
+  drawDust(dt);
+  if (SCENE.drawOver) { octx.save(); SCENE.drawOver(t, ox, oy); octx.restore(); }
+  drawOverlay(t, dt);
+}
+window.addEventListener('mousemove', e => { mx = (e.clientX / W) * 2 - 1; my = (e.clientY / H) * 2 - 1; });
+let rt;
+window.addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(setup, 200); });
+setup();
+requestAnimationFrame(loop);
+
+</script>
+</body>
+</html>
