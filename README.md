@@ -9,6 +9,21 @@ Most scenes are drawn in a minimal grey line style on dark gradients, with real 
 
 ---
 
+## See them in motion
+
+Still frames don't show the movement, so here are short clips recorded straight from the wallpapers. The GIFs are scaled down to keep the page light; click **▶ HD video** for a sharper 9-second MP4.
+
+<table>
+<tr><td align="center" width="50%"><img src="previews/gifs/v1-gravity-well.gif" alt="Black hole · gravity well" width="100%"><br><b>Black hole · gravity well</b><br><a href="previews/videos/v1-gravity-well.mp4">▶ HD video</a> · <a href="wallpapers/black-hole/v1-gravity-well.html">wallpaper file</a></td><td align="center" width="50%"><img src="previews/gifs/v3-vortex.gif" alt="Black hole · vortex" width="100%"><br><b>Black hole · vortex</b><br><a href="previews/videos/v3-vortex.mp4">▶ HD video</a> · <a href="wallpapers/black-hole/v3-vortex.html">wallpaper file</a></td></tr>
+<tr><td align="center" width="50%"><img src="previews/gifs/01-sunflower-phyllotaxis.gif" alt="Sunflower · golden angle" width="100%"><br><b>Sunflower · golden angle</b><br><a href="previews/videos/01-sunflower-phyllotaxis.mp4">▶ HD video</a> · <a href="wallpapers/math-series/01-sunflower-phyllotaxis.html">wallpaper file</a></td><td align="center" width="50%"><img src="previews/gifs/04-ocean-waves.gif" alt="Moonlit ocean" width="100%"><br><b>Moonlit ocean</b><br><a href="previews/videos/04-ocean-waves.mp4">▶ HD video</a> · <a href="wallpapers/math-series/04-ocean-waves.html">wallpaper file</a></td></tr>
+<tr><td align="center" width="50%"><img src="previews/gifs/05-wind-flow.gif" alt="Wind flow" width="100%"><br><b>Wind flow</b><br><a href="previews/videos/05-wind-flow.mp4">▶ HD video</a> · <a href="wallpapers/math-series/05-wind-flow.html">wallpaper file</a></td><td align="center" width="50%"><img src="previews/gifs/08-lorenz-attractor.gif" alt="Lorenz attractor" width="100%"><br><b>Lorenz attractor</b><br><a href="previews/videos/08-lorenz-attractor.mp4">▶ HD video</a> · <a href="wallpapers/math-series/08-lorenz-attractor.html">wallpaper file</a></td></tr>
+<tr><td align="center" width="50%"><img src="previews/gifs/14-neural-network.gif" alt="Neural network (live training)" width="100%"><br><b>Neural network (live training)</b><br><a href="previews/videos/14-neural-network.mp4">▶ HD video</a> · <a href="wallpapers/math-series/14-neural-network.html">wallpaper file</a></td><td align="center" width="50%"><img src="previews/gifs/20-chladni-plate.gif" alt="Chladni plate" width="100%"><br><b>Chladni plate</b><br><a href="previews/videos/20-chladni-plate.mp4">▶ HD video</a> · <a href="wallpapers/math-series/20-chladni-plate.html">wallpaper file</a></td></tr>
+<tr><td align="center" width="50%"><img src="previews/gifs/26-river-village.gif" alt="River village at dawn" width="100%"><br><b>River village at dawn</b><br><a href="previews/videos/26-river-village.mp4">▶ HD video</a> · <a href="wallpapers/nature-and-architecture/26-river-village.html">wallpaper file</a></td><td align="center" width="50%"><img src="previews/gifs/29-mosque-geometry.gif" alt="Mosque · eight-fold geometry" width="100%"><br><b>Mosque · eight-fold geometry</b><br><a href="previews/videos/29-mosque-geometry.mp4">▶ HD video</a> · <a href="wallpapers/nature-and-architecture/29-mosque-geometry.html">wallpaper file</a></td></tr>
+<tr><td align="center" width="50%"><img src="previews/gifs/32-golden-erg.gif" alt="Golden erg (realistic)" width="100%"><br><b>Golden erg (realistic)</b><br><a href="previews/videos/32-golden-erg.mp4">▶ HD video</a> · <a href="wallpapers/realistic/32-golden-erg.html">wallpaper file</a></td><td align="center" width="50%"><img src="previews/gifs/33-moonlit-desert.gif" alt="Moonlit desert (realistic)" width="100%"><br><b>Moonlit desert (realistic)</b><br><a href="previews/videos/33-moonlit-desert.mp4">▶ HD video</a> · <a href="wallpapers/realistic/33-moonlit-desert.html">wallpaper file</a></td></tr>
+</table>
+
+---
+
 ## Contents
 
 | Folder | What's inside |
@@ -17,7 +32,7 @@ Most scenes are drawn in a minimal grey line style on dark gradients, with real 
 | [`wallpapers/math-series/`](wallpapers/math-series) | 20 scenes from mathematics, physics, biology and computer science |
 | [`wallpapers/nature-and-architecture/`](wallpapers/nature-and-architecture) | 11 scenes: aurora, forest, reef, snow, dunes, river village, cathedral, city bridge, mosque, lighthouse, desert world |
 | [`wallpapers/realistic/`](wallpapers/realistic) | 3 realistic, softly lit 3D desert landscapes |
-| [`previews/`](previews) | Still frames of every wallpaper |
+| [`previews/`](previews) | Still frames of every wallpaper, plus animated GIFs and HD video clips of 12 of them |
 | [`source/`](source) | The shared engine, one script per scene, and the build script that assembles them into HTML |
 
 ### Math series
